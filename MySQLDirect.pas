@@ -285,7 +285,7 @@ begin
   begin
     // Check Connection Still Open
     // Reuse If Already Open
-    if (mysql_ping(FConnection) <> 0) then
+    if (mysql_ping(FConnection) <> DEF_NO_ERR) then
     begin
       // Connection Is Dead
       CloseConnection();
@@ -310,7 +310,7 @@ begin
       begin
         // Select Default Schema
         // If User Have No Access Error Returned
-        if (mysql_select_db(FConnection, PChar(FDBSchema)) <> 0) then
+        if (mysql_select_db(FConnection, PChar(FDBSchema)) <> DEF_NO_ERR) then
         begin
           // Free Resources
           CloseConnection();
@@ -383,7 +383,7 @@ begin
     CloseQuery();
 
     // Execute Statement
-    if (mysql_real_query(FConnection, PChar(SQLCommand), Length(SQLCommand)) <> 0) then
+    if (mysql_real_query(FConnection, PChar(SQLCommand), Length(SQLCommand)) <> DEF_NO_ERR) then
     begin
       // Just To Be Sure
       CloseQuery();
@@ -455,7 +455,7 @@ begin
     begin
       // Errors Are Reset After Success
       // Sometimes There Is Error And Result
-      if (mysql_errno(FConnection) = 0) then
+      if (mysql_errno(FConnection) = DEF_NO_ERR) then
       begin
         // Cache Query Filed Names
         GetFieldNames();
