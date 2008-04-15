@@ -65,6 +65,7 @@ const
   FUN_MYSQL_ERROR              = 'mysql_error';
   FUN_MYSQL_SQL_STATE          = 'mysql_sqlstate';
   FUN_MYSQL_INIT               = 'mysql_init';
+  FUN_MYSQL_OPTIONS            = 'mysql_options';
   FUN_MYSQL_REAL_CONNECT       = 'mysql_real_connect';
   FUN_MYSQL_SELECT_DB          = 'mysql_select_db';
   FUN_MYSQL_CLOSE              = 'mysql_close';
@@ -80,11 +81,15 @@ const
   FUN_MYSQL_NUM_FIELDS         = 'mysql_num_fields';
   FUN_MYSQL_FETCH_FIELD_DIRECT = 'mysql_fetch_field_direct';
 
+const
+  MYSQL_OPT_RECONNECT          = 20; // Attemp Auto Reconnect
+
 type
   TMySqlErrNo = function(mysql: PMYSQL): Cardinal; stdcall;
   TMySqlError = function(mysql: PMYSQL): PChar; stdcall;
   TMySqlSqlState = function(mysql: PMYSQL): PChar; stdcall;
   TMySqlInit = function(mysql: PMYSQL): PMYSQL; stdcall;
+  TMySqlOptions = function(mysql: PMYSQL; option: Cardinal; const arg: PChar): Integer; stdcall;
   TMySqlRealConnect = function(mysql: PMYSQL;
     const host, user, passwd, db: PChar; port: Cardinal;
     const unix_socket: PChar; client_flag: LongWord): PMYSQL; stdcall;
@@ -206,6 +211,7 @@ var
   mysql_error: TMySqlError = nil;
   mysql_sqlstate: TMySqlSqlState = nil;
   mysql_init: TMySqlInit = nil;
+  mysql_options: TMySqlOptions = nil;
   mysql_real_connect: TMySqlRealConnect = nil;
   mysql_select_db: TMySqlSelectDb = nil;
   mysql_close: TMySqlClose = nil;
@@ -271,7 +277,8 @@ end;
 // Connection Manage
 procedure TMySQLConnection.OpenConnection;
 var
-  MyErrorMsg: string;
+  MyErrorMsg : string;
+  MyBool     : Byte;
 
 begin
   // MySQLLib Not Init Properly...
@@ -309,6 +316,13 @@ begin
     FConnection := mysql_init(nil);
     if Assigned(FConnection) then
     begin
+      // Set To False
+      MyBool := 0;
+
+      // Do Not ReConnect. Connection Is Closed On Every Error
+      // No Need To Check Result
+      mysql_options(FConnection, MYSQL_OPT_RECONNECT, @MyBool);
+
       // Connect To MySQL Server
       FConnection := mysql_real_connect(FConnection, PChar(FServerHost),
         PChar(FUserName), PChar(FPassword), nil, FServerPort, nil, 0);
@@ -820,6 +834,11 @@ begin
         Exit;
       end;
 
+      if not LoadFunc(LibMySqlHandle, @mysql_options, FUN_MYSQL_OPTIONS) then
+      begin
+        Exit;
+      end;
+
       if not LoadFunc(LibMySqlHandle, @mysql_real_connect, FUN_MYSQL_REAL_CONNECT) then
       begin
         Exit;
@@ -903,6 +922,7 @@ begin
   mysql_error := nil;
   mysql_sqlstate := nil;
   mysql_init := nil;
+  mysql_options := nil;
   mysql_real_connect := nil;
   mysql_select_db := nil;
   mysql_close := nil;
