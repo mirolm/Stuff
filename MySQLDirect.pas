@@ -271,7 +271,7 @@ end;
 // Connection Manage
 procedure TMySQLConnection.OpenConnection;
 var
-  MyErrorMsg: string; 
+  MyErrorMsg: string;
 
 begin
   // MySQLLib Not Init Properly...
