@@ -82,7 +82,7 @@ const
   FUN_MYSQL_FETCH_FIELD_DIRECT = 'mysql_fetch_field_direct';
 
 const
-  MYSQL_OPT_RECONNECT          = 20; // Attemp Auto Reconnect
+  MYSQL_OPT_RECONNECT          = 20; // Attempt Auto Reconnect
 
 type
   TMySqlErrNo = function(mysql: PMYSQL): Cardinal; stdcall;
