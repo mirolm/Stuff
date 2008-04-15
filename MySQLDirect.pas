@@ -119,7 +119,7 @@ const
   // Error Formats
   ERR_FORMAT_S = '%s | %s';
   ERR_FORMAT_D = '%d (#%s) - %s';
-  ERR_INIT     = 'Could Not Init %s';
+  ERR_INIT     = 'Could Not Init';
   ERR_CONN     = 'Connection Closed';
 
 // -------------------------------------------------------------------------- //
@@ -281,7 +281,7 @@ begin
     CloseConnection();
 
     // Throw Exception
-    raise Exception.CreateFmt(ERR_INIT, [LIB_MYSQL]);
+    raise Exception.CreateFmt(ERR_FORMAT_S, [ERR_INIT, LIB_MYSQL]);
   end;
 
   if Assigned(FConnection) then
@@ -330,14 +330,11 @@ begin
       end
       else
       begin
-        // Get Error Before Connection Close
-        MyErrorMsg := GetError();
-
         // Just To Be Sure
         CloseConnection();
 
         // Throw Exception
-        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, MyErrorMsg]);
+        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, DEF_FAIL]);
       end;
     end
     else
