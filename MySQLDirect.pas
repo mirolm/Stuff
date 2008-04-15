@@ -270,6 +270,9 @@ end;
 
 // Connection Manage
 procedure TMySQLConnection.OpenConnection;
+var
+  MyErrorMsg: string; 
+
 begin
   // MySQLLib Not Init Properly...
   if (not IsMySQLOk) then
@@ -287,11 +290,14 @@ begin
     // Reuse If Already Open
     if (mysql_ping(FConnection) <> DEF_NO_ERR) then
     begin
+      // Get Error Before Connection Close
+      MyErrorMsg := GetError();
+
       // Connection Is Dead
       CloseConnection();
 
       // Throw Exception
-      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_PING, GetError()]);
+      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_PING, MyErrorMsg]);
     end;
   end
   else
@@ -312,20 +318,26 @@ begin
         // If User Have No Access Error Returned
         if (mysql_select_db(FConnection, PChar(FDBSchema)) <> DEF_NO_ERR) then
         begin
+          // Get Error Before Connection Close
+          MyErrorMsg := GetError();
+
           // Free Resources
           CloseConnection();
 
           // Throw Exception
-          raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_SELECT_DB, GetError()]);
+          raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_SELECT_DB, MyErrorMsg]);
         end;
       end
       else
       begin
+        // Get Error Before Connection Close
+        MyErrorMsg := GetError();
+
         // Just To Be Sure
         CloseConnection();
 
         // Throw Exception
-        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, GetError()]);
+        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, MyErrorMsg]);
       end;
     end
     else
