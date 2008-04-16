@@ -90,16 +90,15 @@ type
   TMySqlSqlState = function(mysql: PMYSQL): PChar; stdcall;
   TMySqlInit = function(mysql: PMYSQL): PMYSQL; stdcall;
   TMySqlOptions = function(mysql: PMYSQL; option: Cardinal; arg: PChar): Integer; stdcall;
-  TMySqlRealConnect = function(mysql: PMYSQL;
-    host, user, passwd, db: PChar; port: Cardinal;
-    unix_socket: PChar; client_flag: LongWord): PMYSQL; stdcall;
+  TMySqlRealConnect = function(mysql: PMYSQL; host, user, passwd, db: PChar;
+    port: Cardinal; unix_socket: PChar; client_flag: LongWord): PMYSQL; stdcall;
   TMySqlSelectDb = function(mysql: PMYSQL; db: PChar): Integer; stdcall;
   TMySqlClose = procedure(mysql: PMYSQL); stdcall;
   TMySqlPing = function(mysql: PMYSQL): Integer; stdcall;
   TMySqlRealQuery = function(mysql: PMYSQL; stmt_str: PChar; length: LongWord): Integer; stdcall;
   TMySqlAffectedRows = function(mysql: PMYSQL): Int64; stdcall;
   TMySqlInsertId = function(mysql: PMYSQL): Int64; stdcall;
-  TMySqlEscapeString = function(_to: pChar; from: pChar; length: LongWord): LongWord; stdcall;
+  TMySqlEscapeString = function(_to, from: PChar; length: LongWord): LongWord; stdcall;
   TMySqlStoreResult = function(mysql: PMYSQL): PMYSQL_RES; stdcall;
   TMySqlFreeResult = procedure(result: PMYSQL_RES); stdcall;
   TMySqlFetchRow = function(result: PMYSQL_RES): MYSQL_ROW; stdcall;
@@ -156,8 +155,8 @@ type
     function GetFieldIndex(const FieldName: string): Integer;
     function GetFieldValue(const FieldName: string): string;
   public
-    constructor Create(const ServerHost: string; ServerPort: Cardinal; const DBSchema: string;
-      const UserName: string; const Password: string);
+    constructor Create(const ServerHost: string; ServerPort: Cardinal;
+      const DBSchema, UserName, Password: string);
     destructor Destroy; override;
 
     // Other
