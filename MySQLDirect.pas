@@ -31,7 +31,7 @@ type
   MYSQL_ROW         = ^PChar;   // Better Than Fixed Array
 
   PMYSQL_FIELD = ^MYSQL_FIELD;
-  MYSQL_FIELD = packed record
+  MYSQL_FIELD = record
     name:             PChar;    // Name Of Column
     org_name:         PChar;    // Original Column Name, If An Alias
     table:            PChar;    // Table Of Column If Column Was A Field
