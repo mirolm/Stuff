@@ -917,6 +917,8 @@ end;
 
 procedure FreeLib;
 begin
+  IsMySQLOk := False;  
+
   mysql_errno := nil;
   mysql_error := nil;
   mysql_sqlstate := nil;
