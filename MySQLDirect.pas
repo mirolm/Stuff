@@ -692,7 +692,7 @@ var
   ErrorString  : string;
 
 begin
-  // Return Formatted Error Message 
+  // Return Formatted Error Message
   if Assigned(FConnection) then
   begin
     ErrorNumber := mysql_errno(FConnection);
