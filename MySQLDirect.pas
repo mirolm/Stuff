@@ -122,12 +122,11 @@ const
   DEF_FAIL     = 'Failed';                 // For No Connection Errors
   DEF_NO_ERR   = 0;                        // No Error Everything Good
 
-  // Formats
-  ERR_FORMAT_S = '%s | %s';
-  ERR_FORMAT_D = '%d (#%s) - %s';
+  ERR_FORMAT_S = '%s | %s';                // Exception Format
+  ERR_FORMAT_D = '%d (#%s) - %s';          // MySQL Error Format
   ERR_INIT     = 'Could Not Init';
   ERR_CONN     = 'Connection Closed';
-  HEX_FORMAT   = '0x%s';
+  HEX_FORMAT   = '0x%s';                   // 0xHEX_STRING Format
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
