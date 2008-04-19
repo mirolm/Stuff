@@ -74,7 +74,7 @@ const
   FUN_MYSQL_AFFECTED_ROWS      = 'mysql_affected_rows';
   FUN_MYSQL_NUM_ROWS           = 'mysql_num_rows';
   FUN_MYSQL_INSERT_ID          = 'mysql_insert_id';
-  FUN_MYSQL_ESCAPE_STRING      = 'mysql_escape_string';
+  FUN_MYSQL_HEX_STRING         = 'mysql_hex_string';
   FUN_MYSQL_STORE_RESULT       = 'mysql_store_result';
   FUN_MYSQL_FREE_RESULT        = 'mysql_free_result';
   FUN_MYSQL_FETCH_ROW          = 'mysql_fetch_row';
@@ -100,7 +100,7 @@ type
   TMySqlAffectedRows = function(mysql: PMYSQL): Int64; stdcall;
   TMySqlNumRows = function(result: PMYSQL_RES): Int64; stdcall;
   TMySqlInsertId = function(mysql: PMYSQL): Int64; stdcall;
-  TMySqlEscapeString = function(_to, from: PChar; length: LongWord): LongWord; stdcall;
+  TMySqlHexString = function(_to, from: PChar; length: LongWord): LongWord; stdcall;
   TMySqlStoreResult = function(mysql: PMYSQL): PMYSQL_RES; stdcall;
   TMySqlFreeResult = procedure(result: PMYSQL_RES); stdcall;
   TMySqlFetchRow = function(result: PMYSQL_RES): MYSQL_ROW; stdcall;
@@ -122,11 +122,12 @@ const
   DEF_FAIL     = 'Failed';                 // For No Connection Errors
   DEF_NO_ERR   = 0;                        // No Error Everything Good
 
-  // Error Formats
+  // Formats
   ERR_FORMAT_S = '%s | %s';
   ERR_FORMAT_D = '%d (#%s) - %s';
   ERR_INIT     = 'Could Not Init';
   ERR_CONN     = 'Connection Closed';
+  HEX_FORMAT   = '0x%s';
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -187,10 +188,9 @@ type
 
 // Other Routines
 
-// Use This To Escape Values With Reserved Chars
-// To Include This In TMySQLConnection I Need To Analyze
-// Whole SQL Junk Or Implement Parameters In SQL
-function MySqlEscapeString(const InputStr: string): string;
+// !!! Convert String To 0xHEX_STRING  !!!
+// !!! Special Strings And Binary Data !!!
+function MySqlHexString(const InputStr: string): string;
 
 // Loader Routines
 function InitLib: Boolean;
@@ -221,7 +221,7 @@ var
   mysql_affected_rows: TMySqlAffectedRows = nil;
   mysql_num_rows: TMySqlNumRows = nil;
   mysql_insert_id: TMySqlInsertId = nil;
-  mysql_escape_string: TMySqlEscapeString = nil;
+  mysql_hex_string: TMySqlHexString = nil;
   mysql_store_result: TMySqlStoreResult = nil;
   mysql_free_result: TMySqlFreeResult = nil;
   mysql_fetch_row: TMySqlFetchRow = nil;
@@ -724,19 +724,15 @@ begin
 end;
 
 // Other Routines
-function MySqlEscapeString(const InputStr: string): string;
+function MySqlHexString(const InputStr: string): string;
 var
   InputLen  : LongWord;
   OutputLen : LongWord;
   OutputBuf : PChar;
+  OutputVal : string;
 
 begin
   Result := DEF_NO_STR;
-
-  // Used 'mysql_escape_string' Instead Of 'mysql_real_escape_string'
-  // To Have More Freedom. Function Is Deprecated But
-  // Do Not Need FConnection As Input Parameter
-  // If Later Included In TMySQLConnection Use 'mysql_real_escape_string'
 
   // Check MySqlLib Loaded
   if IsMySQLOk then
@@ -747,16 +743,18 @@ begin
       // May Occur Fragmentation
       OutputBuf := AllocMem((InputLen + 1) * 2);
       try
-        // Function mysql_escape_string Is Dumb
-        // All Illegal Chars Are Escaped
-        // If Supplied Whole SQL - Mess Happen
-        // Escape Only Values And Assemble SQL
-        OutputLen := mysql_escape_string(OutputBuf, PChar(InputStr), InputLen);
+        // !!! Convert String To 0xHEX_STRING   !!!
+        // !!! Special Strings And Binary Data  !!!
+        // !!! Use Only For Values Do Not Quote !!!
+        OutputLen := mysql_hex_string(OutputBuf, PChar(InputStr), InputLen);
         if Assigned(OutputBuf) and (OutputLen > 0) then
         begin
           // May Occur Fragmentation
-          SetLength(Result, OutputLen);
-          Move(Pointer(OutputBuf)^, Pointer(Result)^, OutputLen);
+          SetLength(OutputVal, OutputLen);
+          Move(Pointer(OutputBuf)^, Pointer(OutputVal)^, OutputLen);
+
+          // Return Correct Value
+          Result := Format(HEX_FORMAT, [OutputVal]);
         end;
       finally
         FreeMem(OutputBuf);
@@ -826,7 +824,7 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_affected_rows, FUN_MYSQL_AFFECTED_ROWS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_num_rows, FUN_MYSQL_NUM_ROWS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_insert_id, FUN_MYSQL_INSERT_ID) = False) then Exit;
-    if (LoadFunc(MySQLHandle, @mysql_escape_string, FUN_MYSQL_ESCAPE_STRING) = False) then Exit;
+    if (LoadFunc(MySQLHandle, @mysql_hex_string, FUN_MYSQL_HEX_STRING) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_store_result, FUN_MYSQL_STORE_RESULT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_free_result, FUN_MYSQL_FREE_RESULT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_row, FUN_MYSQL_FETCH_ROW) = False) then Exit;
@@ -857,7 +855,7 @@ begin
   mysql_affected_rows := nil;
   mysql_num_rows := nil;
   mysql_insert_id := nil;
-  mysql_escape_string := nil;
+  mysql_hex_string := nil;
   mysql_store_result := nil;
   mysql_free_result := nil;
   mysql_fetch_row := nil;
