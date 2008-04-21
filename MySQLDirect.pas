@@ -74,6 +74,7 @@ const
   FUN_MYSQL_AFFECTED_ROWS      = 'mysql_affected_rows';
   FUN_MYSQL_NUM_ROWS           = 'mysql_num_rows';
   FUN_MYSQL_INSERT_ID          = 'mysql_insert_id';
+  FUN_MYSQL_ESCAPE_STRING      = 'mysql_escape_string';
   FUN_MYSQL_HEX_STRING         = 'mysql_hex_string';
   FUN_MYSQL_STORE_RESULT       = 'mysql_store_result';
   FUN_MYSQL_FREE_RESULT        = 'mysql_free_result';
@@ -100,6 +101,7 @@ type
   TMySqlAffectedRows = function(mysql: PMYSQL): Int64; stdcall;
   TMySqlNumRows = function(result: PMYSQL_RES): Int64; stdcall;
   TMySqlInsertId = function(mysql: PMYSQL): Int64; stdcall;
+  TMySqlEscapeString = function(_to, from: PChar; length: LongWord): LongWord; stdcall;
   TMySqlHexString = function(_to, from: PChar; length: LongWord): LongWord; stdcall;
   TMySqlStoreResult = function(mysql: PMYSQL): PMYSQL_RES; stdcall;
   TMySqlFreeResult = procedure(result: PMYSQL_RES); stdcall;
@@ -186,10 +188,7 @@ type
   end;
 
 // Other Routines
-
-// !!! Convert String To 0xHEX_STRING  !!!
-// !!! Special Strings And Binary Data !!!
-function MySqlHexString(const InputStr: string): string;
+function MySqlEscapeString(const InputStr: string; ToHex: Boolean = False): string;
 
 // Loader Routines
 function InitLib: Boolean;
@@ -220,6 +219,7 @@ var
   mysql_affected_rows: TMySqlAffectedRows = nil;
   mysql_num_rows: TMySqlNumRows = nil;
   mysql_insert_id: TMySqlInsertId = nil;
+  mysql_escape_string: TMySqlEscapeString = nil;
   mysql_hex_string: TMySqlHexString = nil;
   mysql_store_result: TMySqlStoreResult = nil;
   mysql_free_result: TMySqlFreeResult = nil;
@@ -723,7 +723,7 @@ begin
 end;
 
 // Other Routines
-function MySqlHexString(const InputStr: string): string;
+function MySqlEscapeString(const InputStr: string; ToHex: Boolean = False): string;
 var
   InputLen  : LongWord;
   OutputLen : LongWord;
@@ -742,10 +742,12 @@ begin
       // May Occur Fragmentation
       OutputBuf := AllocMem((InputLen + 1) * 2);
       try
-        // !!! Convert String To 0xHEX_STRING   !!!
-        // !!! Special Strings And Binary Data  !!!
-        // !!! Use Only For Values Do Not Quote !!!
-        OutputLen := mysql_hex_string(OutputBuf, PChar(InputStr), InputLen);
+        // Convert Data According To Flag
+        if ToHex then
+          OutputLen := mysql_hex_string(OutputBuf, PChar(InputStr), InputLen)
+        else
+          OutputLen := mysql_escape_string(OutputBuf, PChar(InputStr), InputLen);
+
         if Assigned(OutputBuf) and (OutputLen > 0) then
         begin
           // May Occur Fragmentation
@@ -753,7 +755,11 @@ begin
           Move(Pointer(OutputBuf)^, Pointer(OutputVal)^, OutputLen);
 
           // Return Correct Value
-          Result := Format(HEX_FORMAT, [OutputVal]);
+          // To Be Decoded Format 0xHEX_STRING. No Quotes.
+          if ToHex then
+            Result := Format(HEX_FORMAT, [OutputVal])
+          else
+            Result := OutputVal;
         end;
       finally
         FreeMem(OutputBuf);
@@ -823,6 +829,7 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_affected_rows, FUN_MYSQL_AFFECTED_ROWS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_num_rows, FUN_MYSQL_NUM_ROWS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_insert_id, FUN_MYSQL_INSERT_ID) = False) then Exit;
+    if (LoadFunc(MySQLHandle, @mysql_escape_string, FUN_MYSQL_ESCAPE_STRING) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_hex_string, FUN_MYSQL_HEX_STRING) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_store_result, FUN_MYSQL_STORE_RESULT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_free_result, FUN_MYSQL_FREE_RESULT) = False) then Exit;
@@ -854,6 +861,7 @@ begin
   mysql_affected_rows := nil;
   mysql_num_rows := nil;
   mysql_insert_id := nil;
+  mysql_escape_string := nil;
   mysql_hex_string := nil;
   mysql_store_result := nil;
   mysql_free_result := nil;
