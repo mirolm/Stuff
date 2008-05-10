@@ -85,6 +85,7 @@ const
 
 const
   MYSQL_OPT_RECONNECT          = 20; // Attempt Auto Reconnect
+  MYSQL_OPT_COMPRESS           = 1;  // Use Compress Protocol
 
 type
   TMySqlErrNo = function(mysql: PMYSQL): Cardinal; stdcall;
@@ -323,6 +324,12 @@ begin
       // Do Not ReConnect. Connection Is Closed On Every Error
       // No Need To Check Result. Older Versions Off By Default
       mysql_options(FConnection, MYSQL_OPT_RECONNECT, @MyBool);
+
+      {$IFDEF USE_COMPRESS}
+        // Use Compress Protocol. Good For Big Remote Resultset
+        // Param Ignored For This Option
+        mysql_options(FConnection, MYSQL_OPT_COMPRESS, @MyBool);
+      {$ENDIF}
 
       // Connect To MySQL Server
       FConnection := mysql_real_connect(FConnection, PChar(FServerHost),
