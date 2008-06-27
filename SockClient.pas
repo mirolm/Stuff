@@ -97,6 +97,10 @@ type
      1: (h_addr: ^PInAddr);
   end;
 
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+
 type
   TWSAStartup = function(wVersionRequested: Word; var lpWSAData: TWSAData): Integer; stdcall;
   TWSACleanup = function: Integer; stdcall;
