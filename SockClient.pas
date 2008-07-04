@@ -39,8 +39,8 @@ const
 
   AF_INET     = 2;
   SOCK_STREAM = 1;
-  FIONBIO     = $8004667e;
-
+  FIONBIO     = $8004667E;
+  
   SOCKET_ERROR      = -1;
   WSA_INVALID_EVENT = WSAEVENT(nil);
   INVALID_SOCKET    = TSocket(not(0));
@@ -148,20 +148,36 @@ const
   INET_BUFF_LEN = 4096;
   CHUN_BUFF_LEN = 1024;
   TROTTLE_WAIT  = 10;
-  PROBE_WAIT    = 0;
   SOCK_NO_ERROR = 0;
+
+  SOCKS_VERSION = $04;    // Use SOCKS4 Protocol
+  SOCKS_CONNECT = $01;    // SOCKS CONNECT Command
+  SOCKS_GRANTED = $5A;    // SOCKS Proxy Success
+  SOCKS_USER_ID = 'user'; // SOCKS Default UserId
 
 type
   // Custom Buffers
-  TBufferRec = record
-    Buffer  : Pointer; // Buffer Pointer
-    Length  : Integer; // Alloc Buffer Len
-    Actual  : Integer; // Actual Data Len
-    Initial : Integer; // Initial Buffer Len
+  TBufferRec = packed record
+    Buffer   : Pointer; // Buffer Pointer
+    Length   : Integer; // Alloc Buffer Len
+    Actual   : Integer; // Actual Data Len
+    Initial  : Integer; // Initial Buffer Len
   end;
 
-  // Event Stuff
-  THandleArray = array of THandle;
+  TSocksReq = packed record
+    Version  : Byte;                // SOCKS Protocol Version
+    Cmd      : Byte;                // SOCKS Command
+    Port     : Word;                // Network Byte Order Port Number
+    HostAddr : DWORD;               // Network Byte Order IP Address
+    UserId   : array[0..4] of Char; // UserId Can Be Ignored
+  end;
+
+  TSocksResp = packed record
+    Dummy1   : Byte;  // Always $00
+    Status   : Byte;  // SOCKS Result Code 
+    Dummy2   : Word;  // Ignored
+    Dummy3   : DWORD; // Ignored
+  end;
 
 type
   TSockClient = class
@@ -169,22 +185,28 @@ type
     FSocket     : TSocket;
     FChunkBuff  : TBufferRec;
     FDocument   : TBufferRec;
-    FEventArray : THandleArray;
+    FTimerHwnd  : THandle;
     FTimeout    : Integer;
     FTargetHost : string;
     FTargetPort : Word;
+    FProxyHost  : string;
+    FProxyPort  : Word;
+    FResultCode : Integer;
+    FProxyCode  : Integer;
 
-    // Check Class Init
-    function CheckInit: Boolean;
-    function CheckSocket: Boolean;
     // Timeout Control
     function TimerStart(Timeout: Integer): Boolean;
     procedure TimerAbort;
-    // Socket Stuff
-    function SocketConnect: Boolean;
-    function SocketWrite: Boolean;
-    function SocketRead: Boolean;
+    // Socket Connect
+    function SocketConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
+    function ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
+    function SocketResolve(const TargetHost: string): Longint;
     procedure SocketClose;
+    // Socket Operations
+    function SocketWrite: Boolean;
+    function SocketRead(StopBytes: Integer = 0): Boolean;
+    // Socket Errors
+    function SocketError: Integer;
     // Read Document Result
     function GetDocument: string;
   public
@@ -193,20 +215,26 @@ type
 
     // Simple Request Routines
     function SocketRequest(const Request: string): Boolean;
-    function SocketError: Integer;
     procedure SocketAbort;
 
     property Timeout: Integer read FTimeout write FTimeout;
     property TargetHost: string read FTargetHost write FTargetHost;
     property TargetPort: Word read FTargetPort write FTargetPort;
+    property ProxyHost: string read FProxyHost write FProxyHost;
+    property ProxyPort: Word read FProxyPort write FProxyPort;
     property Document: string read GetDocument;
+    property ResultCode: Integer read FResultCode;
+    property ProxyCode: Integer read FProxyCode;
   end;
 
   // Buffer Routines
   procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer = 0);
-  procedure WriteBuffer(var BufferRec: TBufferRec; const BuffData: string; WritePos: Integer = 0); overload;
+  procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer; BuffLen: Integer;
+    WritePos: Integer = 0); overload;
   procedure WriteBuffer(var BufferRec, ChunkBuff: TBufferRec; WritePos: Integer = 0); overload;
-  function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer; ChunkPos: Integer = 0): string;
+  function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer; ChunkPos: Integer = 0): string; overload;
+  procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer; ChunkSize: Integer;
+    ChunkPos: Integer = 0); overload;
 
   // Loader Routines
   function LoadLib(var LibHandle: THandle; const LibName: string): Boolean;
@@ -249,17 +277,21 @@ constructor TSockClient.Create;
 begin
   inherited Create;
 
-  SetLength(FEventArray, 2);
-  FEventArray[0] := CreateWaitableTimer(nil, True, nil);
-  FEventArray[1] := WSA_INVALID_EVENT;
+  FTimerHwnd := CreateWaitableTimer(nil, True, nil);
 
   ResizeBuffer(FDocument, INET_BUFF_LEN, INET_BUFF_LEN);
   ResizeBuffer(FChunkBuff, CHUN_BUFF_LEN, CHUN_BUFF_LEN);
 
   FTimeout := 60000;
   FSocket := INVALID_SOCKET;
-  FTargetHost := '127.0.0.1';
+
+  FTargetHost := '';
   FTargetPort := 0;
+  FProxyHost := '';
+  FProxyPort := 1080;
+
+  FResultCode := 0;
+  FProxyCode := 0;
 end;
 
 destructor TSockClient.Destroy;
@@ -270,8 +302,7 @@ begin
   SocketClose;
 
   // Release Events
-  CloseHandle(FEventArray[0]);
-  SetLength(FEventArray, 0);
+  CloseHandle(FTimerHwnd);
 
   // Free Buffers
   ResizeBuffer(FDocument, 0);
@@ -280,63 +311,22 @@ begin
   inherited Destroy;
 end;
 
-function TSockClient.CheckInit: Boolean;
-begin
-  try
-    Result := False;
-
-    // Check WinSock2 Init
-    if (IsWinSockOk = False) then Exit;
-
-    // Check Array
-    if (High(FEventArray) <> 1) then Exit;
-
-    // Check Timeout Timer
-    if (FEventArray[0] = INVALID_HANDLE_VALUE) or (FEventArray[0] = 0) then Exit;
-
-    // Check Timeout;
-    if (FTimeout <= 0) then Exit;
-
-    // Check Connect Settings
-    if (Length(Trim(FTargetHost)) <= 0) or (FTargetPort <= 0) then Exit;
-
-    // Check Buffers
-    if (Assigned(FDocument.Buffer) = False) or (FDocument.Length <= 0) then Exit;
-    if (Assigned(FChunkBuff.Buffer) = False) or (FChunkBuff.Length <= 0) then Exit;
-
-    Result := True;
-  except
-    Result := False;
-  end;
-end;
-
-function TSockClient.CheckSocket: Boolean;
-begin
-  try
-    Result := False;
-
-    // Check Socket
-    if (FSocket = INVALID_SOCKET) or (FSocket = 0) then Exit;
-
-    // Check Async Socket Event
-    if (FEventArray[1] = WSA_INVALID_EVENT) or (FEventArray[1] = 0) then Exit;
-
-    Result := True;
-  except
-    Result := False;
-  end;
-end;
-
 function TSockClient.TimerStart(Timeout: Integer): Boolean;
 var
-  TimerDue : LARGE_INTEGER;
+  TimerDue: LARGE_INTEGER;
 
 begin
   try
-    // Set Timeout
-    TimerDue.QuadPart := -10000000 * (Timeout div 1000);
-    // Start Timeout Timer
-    Result := SetWaitableTimer(FEventArray[0], TLargeInteger(TimerDue), 0, nil, nil, False);
+    Result := False;
+
+    // Check Timer Created
+    if (FTimerHwnd <> 0) and (Timeout > 0) then
+    begin
+      // Set Timeout
+      TimerDue.QuadPart := -10000000 * (Timeout div 1000);
+      // Start Timeout Timer
+      Result := SetWaitableTimer(FTimerHwnd, TLargeInteger(TimerDue), 0, nil, nil, False);
+    end;
   except
     Result := False;
   end;
@@ -346,66 +336,119 @@ procedure TSockClient.TimerAbort;
 begin
   try
     // Reset Timer Abort All
-    CancelWaitableTimer(FEventArray[0]);
+    CancelWaitableTimer(FTimerHwnd);
   except
     //
   end;
 end;
 
-function TSockClient.SocketConnect: Boolean;
+function TSockClient.SocketConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
 var
-  argp     : Longint;
-  SockAddr : TSockAddr;
-  HostEnt  : PHostEnt;
-  SockRes  : Integer;
+  argp       : Longint;
+  SockAddr   : TSockAddr;
+  SockRes    : Integer;
+  EventArray : array[0..1] of THandle;
+  EventHwnd  : WSAEVENT;
 
 begin
   try
     Result := False;
 
+    // Check Machine Data
+    if (Length(Trim(ConnectHost)) <= 0) or (ConnectPort <= 0) then Exit;
+
     // Get Socket
     FSocket := socket(AF_INET, SOCK_STREAM, 0);
-    // Create Async Event
-    FEventArray[1] := WSACreateEvent;
 
-    // Just To Be Sure
-    if CheckSocket then
+    // Check Socket
+    if (FSocket = INVALID_SOCKET) then Exit;
+
+    // Enable Non Block Mode
+    argp := 1;
+
+    // Check Results To Be Sure
+    if (ioctlsocket(FSocket, FIONBIO, argp) = SOCK_NO_ERROR) then
     begin
-      // Enable Non Block Mode
-      argp := 1;
+      // Populate Struct
+      SockAddr.sin_port := htons(ConnectPort);
+      SockAddr.sa_family := AF_INET;
+      SockAddr.sin_addr.S_addr := SocketResolve(ConnectHost);
 
-      // Check Results To Be Sure
-      if (ioctlsocket(FSocket, FIONBIO, argp) = SOCK_NO_ERROR) then
+      // Connect To Target Machine
+      SockRes := connect(FSocket, @SockAddr, SizeOf(SockAddr));
+
+      // Check Return Values To Be Sure
+      if (SockRes = SOCKET_ERROR) and (SocketError = WSAEWOULDBLOCK) then
       begin
-        // Connect To Target Machine
-        SockAddr.sin_port := htons(FTargetPort);
-        SockAddr.sa_family := AF_INET;
-        // Make More Bullet Proof
-        SockAddr.sin_addr.S_addr := inet_addr(PChar(FTargetHost));
-        if (SockAddr.sin_addr.S_addr = u_long(INADDR_NONE)) then
-        begin
-          HostEnt := gethostbyname(PChar(FTargetHost));
-          SockAddr.sin_addr.S_addr := LongInt(PLongint(HostEnt.h_addr_list^)^);
-        end;
+        // Create Async Event
+        EventHwnd := WSACreateEvent;
+        // Attach Event
+        SockRes := WSAEventSelect(FSocket, EventHwnd, FD_CONNECT);
+        try
+          // Check Event Attached
+          if (SockRes = SOCK_NO_ERROR) then
+          begin
+            // Attach Events
+            EventArray[0] := FTimerHwnd;
+            EventArray[1] := EventHwnd;
 
-        SockRes := connect(FSocket, @SockAddr, SizeOf(SockAddr));
-
-        // Check Return Values To Be Sure
-        if (SockRes = SOCKET_ERROR) and (SocketError = WSAEWOULDBLOCK) then
-        begin
-          // Attach Event
-          WSAEventSelect(FSocket, FEventArray[1], FD_CONNECT);
-          try
             // Success On Connect Event Fail On Timer Elapse
-            Result := (WaitForMultipleObjects(2, Pointer(FEventArray), False, INFINITE)
+            Result := (WaitForMultipleObjects(2, @EventArray, False, INFINITE)
               = (WAIT_OBJECT_0 + 1));
-          finally
-            // Detach Event
-            WSAEventSelect(FSocket, FEventArray[1], 0);
           end;
+        finally
+          // Detach Event
+          WSAEventSelect(FSocket, EventHwnd, 0);
+          // Close Event
+          WSACloseEvent(EventHwnd);
         end;
       end;
     end;
+  except
+    Result := False;
+  end;
+end;
+
+function TSockClient.ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
+var
+  SocksIn  : TSocksReq;
+  SocksOut : TSocksResp;
+
+begin
+  try
+    Result := False;
+
+    // Check Machine Data
+    if (Length(Trim(ConnectHost)) <= 0) or (ConnectPort <= 0) then Exit;
+
+    // Clear Records Populate With $00
+    ZeroMemory(@SocksIn, SizeOf(SocksIn));
+
+    // Populate SOCKS4 Request
+    SocksIn.Version := SOCKS_VERSION;
+    SocksIn.Cmd := SOCKS_CONNECT;
+    SocksIn.Port := htons(ConnectPort);
+    SocksIn.HostAddr := SocketResolve(ConnectHost);
+    // Field Must Be One Byte Bigger
+    // UserId Have To End With $00
+    SocksIn.UserId := SOCKS_USER_ID;
+
+    // Write To Temporary Buffer
+    WriteBuffer(FDocument, @SocksIn, SizeOf(SocksIn));
+
+    // Send Request
+    if (SocketWrite = False) then Exit;
+    // Recieve Result
+    if (SocketRead(SizeOf(SocksOut)) = False) then Exit;
+
+    // Clear Records
+    ZeroMemory(@SocksOut, SizeOf(SocksOut));
+    // Read SOCKS4 Result
+    ReadBuffer(FDocument, @SocksOut, FDocument.Actual);
+
+    // Check Wish Granted :F
+    Result := (SocksOut.Status = SOCKS_GRANTED);
+    FProxyCode := SocksOut.Status;
   except
     Result := False;
   end;
@@ -415,6 +458,8 @@ function TSockClient.SocketWrite: Boolean;
 var
   BytesSent  : Integer;
   BytesTotal : Integer;
+  EventHwnd  : WSAEVENT;
+  SockRes    : Integer;
 
 begin
   try
@@ -422,17 +467,22 @@ begin
     // Total Bytes Recieved
     BytesTotal := 0;
 
+    // Check Socket
+    if (FSocket = INVALID_SOCKET) then Exit;
+
+    // Create Event
+    EventHwnd := WSACreateEvent;
     // Attach Event
-    WSAEventSelect(FSocket, FEventArray[1], FD_WRITE);
+    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_WRITE);
     try
       // Check Request Length
-      if (FDocument.Actual > 0) then
+      if (FDocument.Actual > 0) and (SockRes = SOCK_NO_ERROR) then
       begin
         // SlowDown Do Not Drain CPU. Watch For Abort
-        while (WaitForSingleObject(FEventarray[0], TROTTLE_WAIT) = WAIT_TIMEOUT) do
+        while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
         begin
           // Only Probe Event
-          if (WaitForSingleObject(FEventArray[1], PROBE_WAIT) = WAIT_OBJECT_0) then
+          if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
           begin
             // Send Always Right Data
             BytesSent := send(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(BytesTotal))^,
@@ -450,53 +500,87 @@ begin
         end;
 
         // Check Send All
-        Result := (BytesTotal >= FDocument.Actual);
+        Result := (BytesTotal = FDocument.Actual);
       end;
     finally
       // Detach Event
-      WSAEventSelect(FSocket, FEventArray[1], 0);
+      WSAEventSelect(FSocket, EventHwnd, 0);
+      // Close Event
+      WSACloseEvent(EventHwnd);
     end;
   except
     Result := False;
   end;
 end;
 
-function TSockClient.SocketRead: Boolean;
+function TSockClient.SocketRead(StopBytes: Integer = 0): Boolean;
+var
+  EventHwnd : WSAEVENT;
+  BuffLen   : Integer;
+  SockRes   : Integer;
+
 begin
   try
+    Result := False;
+
+    // Check Socket
+    if (FSocket = INVALID_SOCKET) then Exit;
+
+    // Create Event
+    EventHwnd := WSACreateEvent;
     // Attach Event
-    WSAEventSelect(FSocket, FEventArray[1], FD_READ);
+    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_READ);
     try
       // Reset Output Buffer
       FDocument.Actual := 0;
 
-      // SlowDown Do Not Drain CPU. Watch For Abort
-      while (WaitForSingleObject(FEventarray[0], TROTTLE_WAIT) = WAIT_TIMEOUT) do
+      // Check Event Attached
+      if (SockRes = SOCK_NO_ERROR) then
       begin
-        // Only Probe Event
-        if (WaitForSingleObject(FEventarray[1], PROBE_WAIT) = WAIT_OBJECT_0) then
+        // SlowDown Do Not Drain CPU. Watch For Abort
+        while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
         begin
-          FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, FChunkBuff.Length, 0);
-          // Check Recieved
-          if (FChunkBuff.Actual > 0) then
+          // Only Probe Event
+          if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
           begin
-            // Move Chunks To Buffer
-            WriteBuffer(FDocument, FChunkBuff, FDocument.Actual);
-          end;
+            // Read Exactly That Count Of Bytes Then Stop
+            if (StopBytes > 0) then
+            begin
+              BuffLen := StopBytes - FDocument.Actual;
+              if (BuffLen > FChunkBuff.Length) then
+              begin
+                BuffLen := FChunkBuff.Length;
+              end;
+            end
+            else
+            begin
+              BuffLen := FChunkBuff.Length;
+            end;
 
-          // Stop When Done
-          if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (FChunkBuff.Actual = 0) then
-          begin
-            Break;
+            FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, BuffLen, 0);
+            // Check Recieved
+            if (FChunkBuff.Actual > 0) then
+            begin
+              // Move Chunks To Buffer
+              WriteBuffer(FDocument, FChunkBuff, FDocument.Actual);
+            end;
+
+            // Stop When Done
+            if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
+              or (FChunkBuff.Actual = 0) or ((StopBytes > 0) and (FDocument.Actual = StopBytes)) then
+            begin
+              Break;
+            end;
           end;
         end;
-      end;
 
-      Result := (FDocument.Actual > 0);
+        Result := (FDocument.Actual > 0);
+      end;
     finally
       // Detach Event
-      WSAEventSelect(FSocket, FEventArray[1], 0);
+      WSAEventSelect(FSocket, EventHwnd, 0);
+      // Close Event
+      WSACloseEvent(EventHwnd);
     end;
   except
     Result := False;
@@ -504,22 +588,31 @@ begin
 end;
 
 procedure TSockClient.SocketClose;
+var
+  EventHwnd : WSAEVENT;
+  SockRes   : Integer;
+
 begin
   try
-    // Check Socket, Events
-    if CheckSocket then
-    begin
-      // Attach Event
-      WSAEventSelect(FSocket, FEventArray[1], FD_CLOSE);
-      try
-        // Disable Socket Operations
-        shutdown(FSocket, SD_SEND);
+    // Check Socket
+    if (FSocket = INVALID_SOCKET) then Exit;
 
+    // Create Event
+    EventHwnd := WSACreateEvent;
+    // Attach Event
+    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_CLOSE);
+    try
+      // Disable Socket Operations
+      shutdown(FSocket, SD_SEND);
+
+      // Check Event Attached
+      if (SockRes = SOCK_NO_ERROR) then
+      begin
         // SlowDown Do Not Drain CPU. Watch For Abort
-        while (WaitForSingleObject(FEventarray[0], TROTTLE_WAIT) = WAIT_TIMEOUT) do
+        while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
         begin
           // Only Probe Event
-          if (WaitForSingleObject(FEventarray[1], PROBE_WAIT) = WAIT_OBJECT_0) then
+          if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
           begin
             FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, FChunkBuff.Length, 0);
 
@@ -531,22 +624,48 @@ begin
             end;
           end;
         end;
-      finally
-        // Detach Event
-        WSAEventSelect(FSocket, FEventArray[1], 0);
       end;
-
-      // Free Event
-      WSACloseEvent(FEventArray[1]);
-      // Close Graceful I Hope
-      closesocket(FSocket);
+    finally
+      // Detach Event
+      WSAEventSelect(FSocket, EventHwnd, 0);
+      // Close Event
+      WSACloseEvent(EventHwnd);
     end;
 
-    // Reset To Invalid
-    FEventArray[1] := WSA_INVALID_EVENT;
+    // Close Graceful I Hope
+    closesocket(FSocket);
+    // Reset Socket Value
     FSocket := INVALID_SOCKET;
   except
     FSocket := INVALID_SOCKET;
+  end;
+end;
+
+function TSockClient.SocketResolve(const TargetHost: string): Longint;
+var
+  HostEnt: PHostEnt;
+
+begin
+  try
+    // Check WinSock2 Init
+    if IsWinSockOk then
+    begin
+      // Convert IP To Network Byte Order
+      Result := inet_addr(PChar(TargetHost));
+      // Convert Failed This Is Host
+      if (Result = u_long(INADDR_NONE)) then
+      begin
+        // Convert Host To Network Byte Order
+        HostEnt := gethostbyname(PChar(TargetHost));
+        Result := LongInt(PLongint(HostEnt.h_addr_list^)^);
+      end;
+    end
+    else
+    begin
+      Result := 0;
+    end;
+  except
+    Result := 0;
   end;
 end;
 
@@ -559,7 +678,7 @@ begin
     Result := False;
 
     // Just To Be Sure
-    if CheckInit then
+    if IsWinSockOk then
     begin
       // Trigger Timeout Timer
       TimerRes := TimerStart(FTimeout);
@@ -567,11 +686,23 @@ begin
         // Check Timer Triggered
         if TimerRes then
         begin
-          // Write Request To Buffer
-          WriteBuffer(FDocument, Request);
+          // Check SOCKS Proxy Attached
+          if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
+          begin
+            // Connect To SOCKS Proxy
+            if (SocketConnect(FProxyHost, FProxyPort) = False) then Exit;
+            // Create Tunnel To Target Host
+            if (ProxyConnect(FTargetHost, FTargetPort) = False) then Exit;
+          end
+          else
+          begin
+            // Connect To Target Host
+            if (SocketConnect(FTargetHost, FTargetPort) = False) then Exit;
+          end;
 
-          // Connect To Target Host
-          if (SocketConnect = False) then Exit;
+          // Write Request To Buffer
+          WriteBuffer(FDocument, Pointer(Request), Length(Request));
+
           // Send Request
           if (SocketWrite = False) then Exit;
           // Recieve Result
@@ -594,6 +725,7 @@ end;
 function TSockClient.SocketError: Integer;
 begin
   try
+    // Check WinSock2 Init
     if IsWinSockOk then
       Result := WSAGetLastError
     else
@@ -601,15 +733,14 @@ begin
   except
     Result := WSABASEERR;
   end;
+
+  FResultCode := Result;
 end;
 
 procedure TSockClient.SocketAbort;
 begin
   try
-    if CheckInit then
-    begin
-      TimerAbort;
-    end;
+    TimerAbort;
   except
     //
   end;
@@ -617,10 +748,11 @@ end;
 
 function TSockClient.GetDocument: string;
 begin
-  if CheckInit then
+  try
     Result := ReadBuffer(FDocument, FDocument.Actual)
-  else
+  except
     Result := '';
+  end;
 end;
 
 // Buffer Routines
@@ -645,22 +777,22 @@ begin
       // Calculate New Size
       if (Needed > BufferRec.Initial) then
         NewSize := ((Needed div BufferRec.Initial) + 1) * BufferRec.Initial
+      else if (Needed = 0) then
+        NewSize := Needed  
       else
         NewSize := BufferRec.Initial;
 
-      // Check Needed To Resize
-      if (Needed > BufferRec.Length) then
+      // Check Needed To Resize, Free Buffer
+      if (Needed > BufferRec.Length) or (Needed = 0) then
       begin
         ReallocMem(BufferRec.Buffer, NewSize);
         BufferRec.Length := NewSize;
-      end;
 
-      // FreeBuffer
-      if (Needed = 0) then
-      begin
-        ReallocMem(BufferRec.Buffer, Needed);
-        BufferRec.Actual := 0;
-        BufferRec.Length := 0;
+        // FreeBuffer
+        if (Needed = 0) then
+        begin
+          BufferRec.Actual := 0;
+        end;
       end;
     end;
   except
@@ -672,7 +804,9 @@ end;
 function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer; ChunkPos: Integer = 0): string;
 begin
   try
-    if Assigned(BufferRec.Buffer) then
+    Result := '';
+
+    if Assigned(BufferRec.Buffer) and (BufferRec.Actual > 0) and (ChunkSize > 0) then
     begin
       if (ChunkPos < BufferRec.Actual) and (ChunkSize <= (BufferRec.Actual - ChunkPos)) then
       begin
@@ -681,30 +815,53 @@ begin
       end;
     end;
   except
+    Result := '';
+  end;
+end;
+
+procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer;
+  ChunkSize: Integer; ChunkPos: Integer = 0); overload;
+begin
+  try
+    if Assigned(BufferRec.Buffer) and (BufferRec.Actual > 0)
+      and Assigned(BuffData) and (ChunkSize > 0) then
+    begin
+      if (ChunkPos < BufferRec.Actual) and (ChunkSize <= (BufferRec.Actual - ChunkPos)) then
+      begin
+        Move(Pointer(DWORD(BufferRec.Buffer) + DWORD(ChunkPos))^, BuffData^, ChunkSize);
+      end;
+    end;
+  except
     //
   end;
 end;
 
-procedure WriteBuffer(var BufferRec: TBufferRec; const BuffData: string; WritePos: Integer = 0);
+procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer;
+  BuffLen: Integer; WritePos: Integer = 0);
 var
   NeededLen: Integer;
 
 begin
   try
-    if Assigned(BufferRec.Buffer) then
+    if Assigned(BufferRec.Buffer) and (BufferRec.Length > 0)
+      and Assigned(BuffData) and (BuffLen > 0) then
     begin
       // Calculate Buffer Resize
-      if ((BufferRec.Length - WritePos) < Length(BuffData)) then
-        NeededLen := BufferRec.Length + (Length(BuffData) - (BufferRec.Length - WritePos))
+      if ((BufferRec.Length - WritePos) < BuffLen) then
+        NeededLen := BufferRec.Length + (BuffLen - (BufferRec.Length - WritePos))
       else
-        NeededLen := Length(BuffData);
+        NeededLen := BuffLen;
 
       // Resize If Needed
       ResizeBuffer(BufferRec, NeededLen);
 
-      // Move Chunk, Adjust Position Marker
-      Move(Pointer(BuffData)^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, Length(BuffData));
-      BufferRec.Actual := WritePos + Length(BuffData);
+      // Check Resized
+      if (BufferRec.Length >= NeededLen) then
+      begin
+        // Move Chunk, Adjust Position Marker
+        Move(BuffData^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, BuffLen);
+        BufferRec.Actual := WritePos + BuffLen;
+      end;
     end;
   except
     //
@@ -717,7 +874,8 @@ var
 
 begin
   try
-    if Assigned(BufferRec.Buffer) and Assigned(ChunkBuff.Buffer) then
+    if Assigned(BufferRec.Buffer) and (BufferRec.Length > 0)
+      and Assigned(ChunkBuff.Buffer) and (ChunkBuff.Actual > 0) then
     begin
       // Calculate Buffer Resize
       if ((BufferRec.Length - WritePos) < ChunkBuff.Actual) then
@@ -728,9 +886,13 @@ begin
       // Resize If Needed
       ResizeBuffer(BufferRec, NeededLen);
 
-      // Move Chunk, Adjust Position Marker
-      Move(Pointer(ChunkBuff.Buffer)^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, ChunkBuff.Actual);
-      BufferRec.Actual := WritePos + ChunkBuff.Actual;
+      // Check Resized
+      if (BufferRec.Length >= NeededLen) then
+      begin
+        // Move Chunk, Adjust Position Marker
+        Move(Pointer(ChunkBuff.Buffer)^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, ChunkBuff.Actual);
+        BufferRec.Actual := WritePos + ChunkBuff.Actual;
+      end;
     end;
   except
     //
