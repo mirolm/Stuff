@@ -204,7 +204,7 @@ type
     procedure SocketClose;
     // Socket Operations
     function SocketWrite: Boolean;
-    function SocketRead(StopBytes: Integer = 0): Boolean;
+    function SocketRead(ReadBytes: Integer = 0): Boolean;
     // Socket Errors
     function SocketError: Integer;
     // Read Document Result
@@ -516,7 +516,7 @@ begin
   end;
 end;
 
-function TSockClient.SocketRead(StopBytes: Integer = 0): Boolean;
+function TSockClient.SocketRead(ReadBytes: Integer = 0): Boolean;
 var
   EventHwnd : WSAEVENT;
   BuffLen   : Integer;
@@ -550,9 +550,9 @@ begin
         if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
         begin
           // Read Exactly That Count Of Bytes Then Stop
-          if (StopBytes > 0) then
+          if (ReadBytes > 0) then
           begin
-            BuffLen := StopBytes - FDocument.Actual;
+            BuffLen := ReadBytes - FDocument.Actual;
             if (BuffLen > FChunkBuff.Length) then
             begin
               BuffLen := FChunkBuff.Length;
@@ -573,7 +573,7 @@ begin
 
           // Stop When Done
           if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (FChunkBuff.Actual = 0) or ((StopBytes > 0) and (FDocument.Actual = StopBytes)) then
+            or (FChunkBuff.Actual = 0) or ((ReadBytes > 0) and (FDocument.Actual = ReadBytes)) then
           begin
             Break;
           end;
