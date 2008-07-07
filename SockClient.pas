@@ -40,7 +40,7 @@ const
   AF_INET     = 2;
   SOCK_STREAM = 1;
   FIONBIO     = $8004667E;
-  
+
   SOCKET_ERROR      = -1;
   WSA_INVALID_EVENT = WSAEVENT(nil);
   INVALID_SOCKET    = TSocket(not(0));
