@@ -150,10 +150,11 @@ const
   TROTTLE_WAIT  = 10;
   SOCK_NO_ERROR = 0;
 
-  SOCKS_VERSION = $04;    // Use SOCKS4 Protocol
-  SOCKS_CONNECT = $01;    // SOCKS CONNECT Command
-  SOCKS_GRANTED = $5A;    // SOCKS Proxy Success
-  SOCKS_USER_ID = 'user'; // SOCKS Default UserId
+  SOCKS_VERSION = $04;       // SOCKS4 Protocol Ident
+  SOCKS_CONNECT = $01;       // SOCKS4 CONNECT Command
+  SOCKS_GRANTED = $5A;       // SOCKS4 Proxy Success
+  SOCKS_USER_ID = 'nobody';  // SOCKS4 Default UserId
+  SOCKS_HOST    = '0.0.0.1'; // SOCKS4A Default Host
 
 type
   // Custom Buffers
@@ -164,17 +165,17 @@ type
     Initial  : Integer; // Initial Buffer Len
   end;
 
+  // SOCKS4 Request Stuff
   TSocksReq = packed record
-    Version  : Byte;                // SOCKS Protocol Version
-    Cmd      : Byte;                // SOCKS Command
-    Port     : Word;                // Network Byte Order Port Number
-    HostAddr : DWORD;               // Network Byte Order IP Address
-    UserId   : array[0..4] of Char; // UserId Can Be Ignored
+    Version  : Byte;  // SOCKS Protocol Version
+    Cmd      : Byte;  // SOCKS Command
+    Port     : Word;  // Network Byte Order Port Number
+    HostAddr : DWORD; // Network Byte Order IP Address
   end;
 
   TSocksResp = packed record
     Dummy1   : Byte;  // Always $00
-    Status   : Byte;  // SOCKS Result Code 
+    Status   : Byte;  // SOCKS Result Code
     Dummy2   : Word;  // Ignored
     Dummy3   : DWORD; // Ignored
   end;
@@ -193,6 +194,7 @@ type
     FProxyPort  : Word;
     FResultCode : Integer;
     FProxyCode  : Integer;
+    FResolver   : Boolean;
 
     // Timeout Control
     function TimerStart(Timeout: Integer): Boolean;
@@ -222,6 +224,7 @@ type
     property TargetPort: Word read FTargetPort write FTargetPort;
     property ProxyHost: string read FProxyHost write FProxyHost;
     property ProxyPort: Word read FProxyPort write FProxyPort;
+    property Resolver: Boolean read FResolver write FResolver;
     property Document: string read GetDocument;
     property ResultCode: Integer read FResultCode;
     property ProxyCode: Integer read FProxyCode;
@@ -289,6 +292,7 @@ begin
   FTargetPort := 0;
   FProxyHost := '';
   FProxyPort := 1080;
+  FResolver := False;
 
   FResultCode := 0;
   FProxyCode := 0;
@@ -412,6 +416,7 @@ function TSockClient.ProxyConnect(const ConnectHost: string; ConnectPort: Word):
 var
   SocksIn  : TSocksReq;
   SocksOut : TSocksResp;
+  ZeroTerm : Byte;
 
 begin
   try
@@ -422,18 +427,38 @@ begin
 
     // Clear Records Populate With $00
     ZeroMemory(@SocksIn, SizeOf(SocksIn));
+    // Clear Terminator
+    ZeroTerm := 0;
 
     // Populate SOCKS4 Request
     SocksIn.Version := SOCKS_VERSION;
     SocksIn.Cmd := SOCKS_CONNECT;
     SocksIn.Port := htons(ConnectPort);
-    SocksIn.HostAddr := SocketResolve(ConnectHost);
-    // Field Must Be One Byte Bigger
-    // UserId Have To End With $00
-    SocksIn.UserId := SOCKS_USER_ID;
+
+    // Use SOCKS4A Resolve In Proxy
+    // Add Invalid IP(0.0.0.1) In Strtuct
+    if Resolver then
+      SocksIn.HostAddr := SocketResolve(SOCKS_HOST)
+    else
+      SocksIn.HostAddr := SocketResolve(ConnectHost);
 
     // Write To Temporary Buffer
     WriteBuffer(FDocument, @SocksIn, SizeOf(SocksIn));
+
+    // Write UserId
+    WriteBuffer(FDocument, PChar(SOCKS_USER_ID), Length(SOCKS_USER_ID), FDocument.Actual);
+    // Write Separator
+    WriteBuffer(FDocument, @ZeroTerm, SizeOf(ZeroTerm), FDocument.Actual);
+
+    // Use SOCKS4A Resolve In Proxy
+    // Add Additional Field For Host Resolve
+    if Resolver then
+    begin
+      // Write UserId
+      WriteBuffer(FDocument, PChar(ConnectHost), Length(ConnectHost), FDocument.Actual);
+      // Write Separator
+      WriteBuffer(FDocument, @ZeroTerm, SizeOf(ZeroTerm), FDocument.Actual);
+    end;
 
     // Send Request
     if (SocketWrite = False) then Exit;
@@ -682,6 +707,10 @@ var
 begin
   try
     Result := False;
+
+    // Reset Error Vars
+    FResultCode := WSABASEERR;
+    FProxyCode := 0;
 
     // Just To Be Sure
     if (IsWinSockOk = False) then Exit;
