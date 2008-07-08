@@ -39,6 +39,7 @@ const
 
   AF_INET     = 2;
   SOCK_STREAM = 1;
+  IPPROTO_TCP = 6;
   FIONBIO     = $8004667E;
 
   SOCKET_ERROR      = -1;
@@ -109,6 +110,8 @@ type
   TWSACleanup = function: Integer; stdcall;
   TWSAGetLastError = function: Integer; stdcall;
   TWSASetLastError = procedure(iError: Integer); stdcall;
+  TGetSockOpt = function(s: TSocket; level, optname: Integer; optval: PChar;
+    var optlen: Integer): Integer; stdcall;
   TTSocket = function(af, _type, protocol: Integer): TSocket; stdcall;
   TIoctlSocket = function(s: TSocket; cmd: DWORD; var argp: Integer): Integer; stdcall;
   TConnect = function(s: TSocket; name: PSockAddr; namelen: Integer): Integer; stdcall;
@@ -123,8 +126,6 @@ type
   Thtons = function(hostshort: u_short): u_short; stdcall;
   TInet_addr = function(cp: PChar): u_long; stdcall;
   TGetHostByName = function(name: PChar): PHostEnt; stdcall;
-  TGetSockOpt = function(s: TSocket; level, optname: Integer; optval: PChar;
-    var optlen: Integer): Integer; stdcall;
 
 const
   LIB_WIN_SOCK           = 'ws2_32.dll';
@@ -133,6 +134,7 @@ const
   FUN_WSA_CLEANUP        = 'WSACleanup';
   FUN_WSA_GET_LAST_ERROR = 'WSAGetLastError';
   FUN_WSA_SET_LAST_ERROR = 'WSASetLastError';
+  FUN_GET_SOCK_OPT       = 'getsockopt';
   FUN_SOCKET             = 'socket';
   FUN_IO_CTL_SOCKET      = 'ioctlsocket';
   FUN_CONNECT            = 'connect';
@@ -146,7 +148,6 @@ const
   FUN_HTONS              = 'htons';
   FUN_INET_ADDR          = 'inet_addr';
   FUN_GET_HOST_BY_NAME   = 'gethostbyname';
-  FUN_GET_SOCK_OPT       = 'getsockopt';
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -228,13 +229,17 @@ type
     function SocketRequest(const Request: string): Boolean;
     procedure SocketAbort;
 
+    // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
     property TargetHost: string read FTargetHost write FTargetHost;
     property TargetPort: Word read FTargetPort write FTargetPort;
     property ProxyHost: string read FProxyHost write FProxyHost;
     property ProxyPort: Word read FProxyPort write FProxyPort;
+    // SOCKS4, SOCKS4A Toggle
     property Resolver: Boolean read FResolver write FResolver;
+    // Request Result
     property Document: string read GetDocument;
+    // Socket, Proxy Error Codes
     property ResultCode: Integer read FResultCode;
     property ProxyCode: Integer read FProxyCode;
   end;
@@ -266,6 +271,7 @@ var
   WSACleanup: TWSACleanup = nil;
   WSAGetLastError: TWSAGetLastError = nil;
   WSASetLastError: TWSASetLastError = nil;
+  getsockopt: TGetSockOpt = nil;
   socket: TTSocket = nil;
   ioctlsocket: TIoctlSocket = nil;
   connect: TConnect = nil;
@@ -279,7 +285,6 @@ var
   htons: Thtons = nil;
   inet_addr: TInet_addr = nil;
   gethostbyname: TGetHostByName = nil;
-  getsockopt: TGetSockOpt = nil;
 
 implementation
 
@@ -371,7 +376,7 @@ begin
     if (Length(Trim(ConnectHost)) <= 0) or (ConnectPort <= 0) then Exit;
 
     // Get Socket
-    FSocket := socket(AF_INET, SOCK_STREAM, 0);
+    FSocket := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
@@ -409,6 +414,8 @@ begin
         // Success On Connect Event Fail On Timer Elapse
         if (WaitForMultipleObjects(2, @EventArray, False, INFINITE) = (WAIT_OBJECT_0 + 1)) then
         begin
+          // Check Socket Errors
+          // Detect Connection Reset
           Result := (SocketError = SOCK_NO_ERROR);
         end;
       end;
@@ -447,7 +454,7 @@ begin
     SocksIn.Port := htons(ConnectPort);
 
     // Use SOCKS4A Resolve In Proxy
-    // Add Invalid IP(0.0.0.1) In Strtuct
+    // Add Invalid IP(0.0.0.x) In Strtuct
     if Resolver then
       SocksIn.HostAddr := SocketResolve(SOCKS_HOST)
     else
@@ -1033,6 +1040,7 @@ begin
     if (LoadFunc(WSLibHandle, @WSACleanup, FUN_WSA_CLEANUP) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSAGetLastError, FUN_WSA_GET_LAST_ERROR) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSASetLastError, FUN_WSA_SET_LAST_ERROR) = False) then Exit;
+    if (LoadFunc(WSLibHandle, @getsockopt, FUN_GET_SOCK_OPT) = False) then Exit;
     if (LoadFunc(WSLibHandle, @socket, FUN_SOCKET) = False) then Exit;
     if (LoadFunc(WSLibHandle, @ioctlsocket, FUN_IO_CTL_SOCKET) = False) then Exit;
     if (LoadFunc(WSLibHandle, @connect, FUN_CONNECT) = False) then Exit;
@@ -1046,7 +1054,6 @@ begin
     if (LoadFunc(WSLibHandle, @htons, FUN_HTONS) = False) then Exit;
     if (LoadFunc(WSLibHandle, @inet_addr, FUN_INET_ADDR) = False) then Exit;
     if (LoadFunc(WSLibHandle, @gethostbyname, FUN_GET_HOST_BY_NAME) = False) then Exit;
-    if (LoadFunc(WSLibHandle, @getsockopt, FUN_GET_SOCK_OPT) = False) then Exit;
 
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
@@ -1069,6 +1076,7 @@ begin
     WSACleanup := nil;
     WSAGetLastError := nil;
     WSASetLastError := nil;
+    getsockopt := nil;
     socket := nil;
     ioctlsocket := nil;
     connect := nil;
@@ -1082,7 +1090,6 @@ begin
     htons := nil;
     inet_addr := nil;
     gethostbyname := nil;
-    getsockopt := nil;
 
     ReleaseLib(WSLibHandle);
   except
