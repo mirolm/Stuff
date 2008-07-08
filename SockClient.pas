@@ -183,7 +183,7 @@ type
   end;
 
   TSocksResp = packed record
-    Dummy1   : Byte;  // Always $00
+    Zero     : Byte;  // Always $00
     Status   : Byte;  // SOCKS Result Code
     Dummy2   : Word;  // Ignored
     Dummy3   : DWORD; // Ignored
@@ -488,11 +488,14 @@ begin
     // Read SOCKS4 Result
     ReadBuffer(FDocument, @SocksOut, FDocument.Actual);
 
-    // Set Proxy Status
-    FProxyCode := SocksOut.Status;
-
-    // Check Wish Granted :F
-    Result := (SocksOut.Status = SOCKS_GRANTED);
+    // Check First Byte Good
+    if (SocksOut.Zero = 0) then
+    begin
+      // Set Proxy Status
+      FProxyCode := SocksOut.Status;
+      // Check Wish Granted :F
+      Result := (SocksOut.Status = SOCKS_GRANTED);
+    end;
   except
     Result := False;
   end;
