@@ -827,6 +827,18 @@ begin
   FResultCode := SOCK_NO_ERROR;
   FProxyCode := SOCK_NO_ERROR;
 
+  // Reset Document Buffer
+  if Assigned(FDocument.Buffer) and (FDocument.Length > 0) then
+  begin
+    ZeroMemory(FDocument.Buffer, FDocument.Length);
+  end;
+
+  // Reset Chunk Buffer
+  if Assigned(FChunkBuff.Buffer) and (FChunkBuff.Length > 0) then
+  begin
+    ZeroMemory(FChunkBuff.Buffer, FChunkBuff.Length);
+  end;
+
   // Reset Errors
   if IsWinSockOk then
   begin
