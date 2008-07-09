@@ -797,6 +797,7 @@ begin
       SockErr := SOCK_NO_ERROR;
       // Get Correct Buffer Size
       OptLen := SizeOf(SockErr);
+
       // Even If Failed Socket Will Signal Event
       if (getsockopt(FSocket, SOL_SOCKET, SO_ERROR, @SockErr, OptLen) = SOCK_NO_ERROR) then
       begin
@@ -1075,7 +1076,7 @@ begin
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
     // Startup WinSock2
-    Result := (WSAStartup(MakeWord(2, 2), WSAData) = 0);
+    Result := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
   except
     Result := False;
   end;
