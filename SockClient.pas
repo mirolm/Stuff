@@ -212,7 +212,7 @@ type
     function SocketConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
     function ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
     function SocketResolve(const TargetHost: string): Longint;
-    procedure SocketClose;
+    procedure SocketClose(CloseGraceful: Boolean = False);
     // Socket Operations
     function SocketWrite: Boolean;
     function SocketRead(ReadBytes: Integer = 0): Boolean;
@@ -391,11 +391,9 @@ begin
     // Check Event
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
-    // Attach Event
-    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_CONNECT or FD_CLOSE);
     try
-      // Check Event Attached
-      if (SockRes <> SOCK_NO_ERROR) then Exit;
+      // Attach Event, Check Attached
+      if (WSAEventSelect(FSocket, EventHwnd, FD_CONNECT) <> SOCK_NO_ERROR) then Exit;
 
       // Populate Struct
       SockAddr.sin_port := htons(ConnectPort);
@@ -506,7 +504,6 @@ var
   BytesSent  : Integer;
   BytesTotal : Integer;
   EventHwnd  : WSAEVENT;
-  SockRes    : Integer;
 
 begin
   try
@@ -522,11 +519,12 @@ begin
     // Check Event
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
-    // Attach Event
-    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_WRITE);
     try
+      // Attach Event, Check Attached
+      if (WSAEventSelect(FSocket, EventHwnd, FD_WRITE) <> SOCK_NO_ERROR) then Exit;
+
       // Check Request Length, Event Attached
-      if (FDocument.Actual <= 0) or (SockRes <> SOCK_NO_ERROR) then Exit;
+      if (FDocument.Actual <= 0) then Exit;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
@@ -566,7 +564,6 @@ function TSockClient.SocketRead(ReadBytes: Integer = 0): Boolean;
 var
   EventHwnd : WSAEVENT;
   BuffLen   : Integer;
-  SockRes   : Integer;
 
 begin
   try
@@ -580,14 +577,12 @@ begin
     // Check Event
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
-    // Attach Event
-    SockRes := WSAEventSelect(FSocket, EventHwnd, FD_READ);
     try
+      // Attach Event, Check Attached
+      if (WSAEventSelect(FSocket, EventHwnd, FD_READ) <> SOCK_NO_ERROR) then Exit;
+
       // Reset Output Buffer
       FDocument.Actual := 0;
-
-      // Check Event Attached
-      if (SockRes <> SOCK_NO_ERROR) then Exit;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
@@ -638,44 +633,44 @@ begin
   end;
 end;
 
-procedure TSockClient.SocketClose;
+procedure TSockClient.SocketClose(CloseGraceful: Boolean = False);
 var
   EventHwnd : WSAEVENT;
-  SockRes   : Integer;
 
 begin
   try
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
-    // Create Event
-    EventHwnd := WSACreateEvent;
-    // Check Event
-    if (EventHwnd <> WSA_INVALID_EVENT) then
-    begin
-      // Attach Event
-      SockRes := WSAEventSelect(FSocket, EventHwnd, FD_CONNECT or FD_CLOSE);
+    try
+      // Connect Failed Skip ShutDown
+      if (CloseGraceful = False) then Exit;
+
+      // Create Event
+      EventHwnd := WSACreateEvent;
+      // Check Event
+      if (EventHwnd = WSA_INVALID_EVENT) then Exit;
+
       try
+        // Attach Event, Check Attached
+        if (WSAEventSelect(FSocket, EventHwnd, FD_CLOSE) <> SOCK_NO_ERROR) then Exit;
+
         // Disable Socket Operations
-        shutdown(FSocket, SD_SEND);
+        if (shutdown(FSocket, SD_SEND) <> SOCK_NO_ERROR) then Exit;
 
-        // Check Event Attached
-        if (SockRes = SOCK_NO_ERROR) then
+        // SlowDown Do Not Drain CPU. Watch For Abort
+        while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
         begin
-          // SlowDown Do Not Drain CPU. Watch For Abort
-          while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
+          // SlowDown Do Not Drain CPU
+          if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
           begin
-            // SlowDown Do Not Drain CPU
-            if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
-            begin
-              FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, FChunkBuff.Length, 0);
+            FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, FChunkBuff.Length, 0);
 
-              // Stop When Done
-              if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-                or (FChunkBuff.Actual = 0) then
-              begin
-                Break;
-              end;
+            // Stop When Done
+            if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
+              or (FChunkBuff.Actual = 0) then
+            begin
+              Break;
             end;
           end;
         end;
@@ -685,12 +680,12 @@ begin
         // Close Event
         WSACloseEvent(EventHwnd);
       end;
+    finally
+      // Close Graceful I Hope
+      closesocket(FSocket);
+      // Reset Socket Value
+      FSocket := INVALID_SOCKET;
     end;
-
-    // Close Graceful I Hope
-    closesocket(FSocket);
-    // Reset Socket Value
-    FSocket := INVALID_SOCKET;
   except
     FSocket := INVALID_SOCKET;
   end;
@@ -723,11 +718,15 @@ end;
 
 function TSockClient.SocketRequest(const Request: string): Boolean;
 var
-  TimerRes: Boolean;
+  TimerRes      : Boolean;
+  CloseGraceful : Boolean;
 
 begin
   try
     Result := False;
+
+    // Force Hard Socket Close
+    CloseGraceful := False;
 
     // Prepare Socket
     SocketReset;
@@ -755,6 +754,9 @@ begin
         if (SocketConnect(FTargetHost, FTargetPort) = False) then Exit;
       end;
 
+      // Connected Close Graceful
+      CloseGraceful := True;
+
       // Write Request To Buffer
       WriteBuffer(FDocument, Pointer(Request), Length(Request));
 
@@ -766,7 +768,7 @@ begin
       Result := True;
     finally
       // Disconnect Close Socket
-      SocketClose;
+      SocketClose(CloseGraceful);
       // Abort Timeout Timer
       TimerAbort;
     end;
