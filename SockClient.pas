@@ -511,6 +511,9 @@ begin
     // Total Bytes Recieved
     BytesTotal := 0;
 
+    // Check Request Length
+    if (FDocument.Actual <= 0) then Exit;
+
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
@@ -522,9 +525,6 @@ begin
     try
       // Attach Event, Check Attached
       if (WSAEventSelect(FSocket, EventHwnd, FD_WRITE) <> SOCK_NO_ERROR) then Exit;
-
-      // Check Request Length, Event Attached
-      if (FDocument.Actual <= 0) then Exit;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
@@ -635,7 +635,7 @@ end;
 
 procedure TSockClient.SocketClose(CloseGraceful: Boolean = False);
 var
-  EventHwnd : WSAEVENT;
+  EventHwnd: WSAEVENT;
 
 begin
   try
@@ -718,8 +718,7 @@ end;
 
 function TSockClient.SocketRequest(const Request: string): Boolean;
 var
-  TimerRes      : Boolean;
-  CloseGraceful : Boolean;
+  CloseGraceful: Boolean;
 
 begin
   try
@@ -735,11 +734,9 @@ begin
     if (IsWinSockOk = False) then Exit;
 
     // Trigger Timeout Timer
-    TimerRes := TimerStart(FTimeout);
-    try
-      // Check Timer Triggered
-      if (TimerRes = False) then Exit;
+    if (TimerStart(FTimeout) = False) then Exit;
 
+    try
       // Check SOCKS Proxy Attached
       if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
       begin
@@ -784,6 +781,9 @@ var
 
 begin
   try
+    // Set Default Error
+    Result := WSABASEERR;
+
     // Check WinSock2 Init
     if IsWinSockOk then
     begin
@@ -809,10 +809,6 @@ begin
           WSASetLastError(SockErr);
         end;
       end;
-    end
-    else
-    begin
-      Result := WSABASEERR;
     end;
   except
     Result := WSABASEERR;
