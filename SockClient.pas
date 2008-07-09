@@ -1018,18 +1018,12 @@ end;
 function LoadFunc(LibHandle: THandle; var FuncPtr: FARPROC; const FuncName: string): Boolean;
 begin
   FuncPtr := nil;
+  Result := False;
 
   if (LibHandle <> 0) then
   begin
     FuncPtr := GetProcAddress(LibHandle, PChar(FuncName));
-    if Assigned(FuncPtr) then
-      Result := True
-    else
-      Result := False;
-  end
-  else
-  begin
-    Result := False;
+    Result := Assigned(FuncPtr);
   end;
 end;
 
