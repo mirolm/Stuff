@@ -296,9 +296,9 @@ constructor TSockClient.Create;
 begin
   inherited Create;
 
-  FTimerHwnd := CreateWaitableTimer(nil, True, nil);
   FTimeout := 60000;
 
+  // Init Buffers
   ResizeBuffer(FDocument, INET_BUFF_LEN, INET_BUFF_LEN);
   ResizeBuffer(FChunkBuff, CHUN_BUFF_LEN, CHUN_BUFF_LEN);
 
@@ -319,9 +319,6 @@ begin
   // Destroy Socket
   SocketClose;
 
-  // Release Events
-  CloseHandle(FTimerHwnd);
-
   // Free Buffers
   ResizeBuffer(FDocument, 0);
   ResizeBuffer(FChunkBuff, 0);
@@ -337,15 +334,19 @@ begin
   try
     Result := False;
 
+    // Check Timeout Valid
+    if (Timeout <= 0) then Exit;
+
+    FTimerHwnd := CreateWaitableTimer(nil, True, nil);
     // Check Timer Created
-    if (FTimerHwnd <> 0) and (Timeout > 0) then
-    begin
-      // Set Timeout
-      TimerDue.QuadPart := -10000000 * (Timeout div 1000);
-      // Start Timeout Timer
-      Result := SetWaitableTimer(FTimerHwnd, TLargeInteger(TimerDue), 0, nil, nil, False);
-    end;
+    if (FTimerHwnd = 0) then Exit;
+
+    // Set Timeout
+    TimerDue.QuadPart := -10000000 * (Timeout div 1000);
+    // Start Timeout Timer
+    Result := SetWaitableTimer(FTimerHwnd, TLargeInteger(TimerDue), 0, nil, nil, False);
   except
+    FTimerHwnd := INVALID_HANDLE_VALUE;
     Result := False;
   end;
 end;
@@ -353,10 +354,20 @@ end;
 procedure TSockClient.TimerAbort;
 begin
   try
-    // Reset Timer Abort All
-    CancelWaitableTimer(FTimerHwnd);
+    // Check Handle
+    if (FTimerHwnd = INVALID_HANDLE_VALUE) then Exit;
+
+    try
+      // Reset Timer Abort All
+      CancelWaitableTimer(FTimerHwnd);
+    finally
+      // Release Timer
+      CloseHandle(FTimerHwnd);
+      // Reset Handle
+      FTimerHwnd := INVALID_HANDLE_VALUE;
+    end;
   except
-    //
+    FTimerHwnd := INVALID_HANDLE_VALUE;
   end;
 end;
 
@@ -374,6 +385,9 @@ begin
 
     // Check Machine Data
     if (Length(Trim(ConnectHost)) <= 0) or (ConnectPort <= 0) then Exit;
+
+    // Check Timer
+    if (FTimerHwnd = 0) then Exit;
 
     // Get Socket
     FSocket := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -514,6 +528,9 @@ begin
     // Check Request Length
     if (FDocument.Actual <= 0) then Exit;
 
+    // Check Timer
+    if (FTimerHwnd = 0) then Exit;
+
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
@@ -568,6 +585,9 @@ var
 begin
   try
     Result := False;
+
+    // Check Timer
+    if (FTimerHwnd = 0) then Exit;
 
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
@@ -643,6 +663,9 @@ begin
     if (FSocket = INVALID_SOCKET) then Exit;
 
     try
+      // Check Timer
+      if (FTimerHwnd = 0) then Exit;
+
       // Connect Failed Skip ShutDown
       if (CloseGraceful = False) then Exit;
 
@@ -733,10 +756,10 @@ begin
     // Just To Be Sure
     if (IsWinSockOk = False) then Exit;
 
-    // Trigger Timeout Timer
-    if (TimerStart(FTimeout) = False) then Exit;
-
     try
+      // Trigger Timeout Timer
+      if (TimerStart(FTimeout) = False) then Exit;
+
       // Check SOCKS Proxy Attached
       if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
       begin
@@ -821,6 +844,8 @@ procedure TSockClient.SocketReset;
 begin
   // Reset Socket
   FSocket := INVALID_SOCKET;
+  // Reset Timer
+  FTimerHwnd := INVALID_HANDLE_VALUE;
 
   // Reset Error Vars
   FResultCode := SOCK_NO_ERROR;
