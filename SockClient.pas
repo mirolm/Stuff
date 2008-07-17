@@ -40,6 +40,7 @@ const
   AF_INET     = 2;
   SOCK_STREAM = 1;
   IPPROTO_TCP = 6;
+  FIONREAD    = $4004667F;
   FIONBIO     = $8004667E;
 
   SOCKET_ERROR      = -1;
@@ -154,10 +155,10 @@ const
 // -------------------------------------------------------------------------- //
 
 const
-  INET_BUFF_LEN = 4096;
-  CHUN_BUFF_LEN = 1024;
-  TROTTLE_WAIT  = 10;
-  SOCK_NO_ERROR = 0;
+  INET_BUFF_LEN = 1024;      // Buffer Resize Step
+  SOCK_MAX_CHUN = 65536;     // Max Packet Size
+  TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
+  SOCK_NO_ERROR = 0;         // WinSock Success
 
   SOCKS_VERSION = $04;       // SOCKS4 Protocol Ident
   SOCKS_CONNECT = $01;       // SOCKS4 CONNECT Command
@@ -193,7 +194,6 @@ type
   TSockClient = class
   private
     FSocket     : TSocket;
-    FChunkBuff  : TBufferRec;
     FDocument   : TBufferRec;
     FTimerHwnd  : THandle;
     FTimeout    : Integer;
@@ -215,7 +215,7 @@ type
     procedure SocketClose(CloseGraceful: Boolean = False);
     // Socket Operations
     function SocketWrite: Boolean;
-    function SocketRead(ReadBytes: Integer = 0): Boolean;
+    function SocketRead(ReadBytes: Integer = 0; SockShut: Boolean = False): Boolean;
     // Socket Errors
     function SocketError: Integer;
     procedure SocketReset;
@@ -246,18 +246,16 @@ type
 
   // Buffer Routines
   procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer = 0);
-  procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer; BuffLen: Integer;
-    WritePos: Integer = 0); overload;
-  procedure WriteBuffer(var BufferRec, ChunkBuff: TBufferRec; WritePos: Integer = 0); overload;
-  function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer; ChunkPos: Integer = 0): string; overload;
-  procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer; ChunkSize: Integer;
-    ChunkPos: Integer = 0); overload;
+  procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer; BuffLen: Integer; WritePos: Integer = 0);
+  function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer): string; overload;
+  procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer; ChunkSize: Integer); overload;
 
   // Loader Routines
   function LoadLib(var LibHandle: THandle; const LibName: string): Boolean;
   function LoadFunc(LibHandle: THandle; var FuncPtr: FARPROC; const FuncName: string): Boolean;
   function ReleaseLib(var LibHandle: THandle): Boolean;
 
+  // Init Routines
   function InitLib: Boolean;
   procedure FreeLib;
 
@@ -300,7 +298,6 @@ begin
 
   // Init Buffers
   ResizeBuffer(FDocument, INET_BUFF_LEN, INET_BUFF_LEN);
-  ResizeBuffer(FChunkBuff, CHUN_BUFF_LEN, CHUN_BUFF_LEN);
 
   FTargetHost := '';
   FTargetPort := 0;
@@ -321,7 +318,6 @@ begin
 
   // Free Buffers
   ResizeBuffer(FDocument, 0);
-  ResizeBuffer(FChunkBuff, 0);
 
   inherited Destroy;
 end;
@@ -484,7 +480,7 @@ begin
     // Add Additional Field For Host Resolve
     if Resolver then
     begin
-      // Write UserId
+      // Write Resolve Host
       WriteBuffer(FDocument, PChar(ConnectHost), Length(ConnectHost), FDocument.Actual);
       // Write Separator
       WriteBuffer(FDocument, @ZeroTerm, SizeOf(ZeroTerm), FDocument.Actual);
@@ -492,7 +488,7 @@ begin
 
     // Send Request
     if (SocketWrite = False) then Exit;
-    // Recieve Result
+    // Recieve Only Result Struct
     if (SocketRead(SizeOf(SocksOut)) = False) then Exit;
 
     // Clear Records
@@ -518,11 +514,12 @@ var
   BytesSent  : Integer;
   BytesTotal : Integer;
   EventHwnd  : WSAEVENT;
+  BuffLen    : Integer;
 
 begin
   try
     Result := False;
-    // Total Bytes Recieved
+    // Total Bytes Send
     BytesTotal := 0;
 
     // Check Request Length
@@ -549,11 +546,20 @@ begin
         // SlowDown Do Not Drain CPU
         if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
         begin
+          // Send Max SOCK_MAX_CHUN Len
+          BuffLen := FDocument.Actual - BytesTotal;
+          if (BuffLen > SOCK_MAX_CHUN) then
+          begin
+            BuffLen := SOCK_MAX_CHUN;
+          end;
+
           // Send Always Right Data
-          BytesSent := send(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(BytesTotal))^,
-            (FDocument.Actual - BytesTotal), 0);
+          BytesSent := send(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(BytesTotal))^, BuffLen, 0);
           // Caclulate Total Bytes Send
-          Inc(BytesTotal, BytesSent);
+          if (BytesSent > 0) then
+          begin
+            Inc(BytesTotal, BytesSent);
+          end;
 
           // Stop When Done
           if ((BytesSent = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
@@ -577,14 +583,20 @@ begin
   end;
 end;
 
-function TSockClient.SocketRead(ReadBytes: Integer = 0): Boolean;
+function TSockClient.SocketRead(ReadBytes: Integer = 0; SockShut: Boolean = False): Boolean;
 var
-  EventHwnd : WSAEVENT;
-  BuffLen   : Integer;
+  EventHwnd  : WSAEVENT;
+  BuffLen    : Integer;
+  BuffMax    : Integer;
+  BytesRead  : Integer;
+  BytesTotal : Integer;
+  WritePoint : Integer;
 
 begin
   try
     Result := False;
+    // Botal Bytes Recv
+    BytesTotal := 0;
 
     // Check Timer
     if (FTimerHwnd = 0) then Exit;
@@ -599,10 +611,19 @@ begin
 
     try
       // Attach Event, Check Attached
-      if (WSAEventSelect(FSocket, EventHwnd, FD_READ) <> SOCK_NO_ERROR) then Exit;
-
-      // Reset Output Buffer
-      FDocument.Actual := 0;
+      // Check Operation Type
+      if SockShut then
+      begin
+        if (WSAEventSelect(FSocket, EventHwnd, FD_CLOSE) <> SOCK_NO_ERROR) then Exit;
+        // Disable Socket Operations
+        if (shutdown(FSocket, SD_SEND) <> SOCK_NO_ERROR) then Exit;
+      end
+      else
+      begin
+        if (WSAEventSelect(FSocket, EventHwnd, FD_READ) <> SOCK_NO_ERROR) then Exit;
+        // Reset Output Buffer
+        FDocument.Actual := 0;
+      end;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
@@ -610,39 +631,70 @@ begin
         // SlowDown Do Not Drain CPU
         if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
         begin
-          // Read Exactly That Count Of Bytes Then Stop
-          if (ReadBytes > 0) then
+          // Reset To Be Sure
+          BytesRead := SOCKET_ERROR;
+          // Stream Bigger Chunks
+          if (ioctlsocket(FSocket, FIONREAD, BuffMax) = SOCK_NO_ERROR) then
           begin
-            BuffLen := ReadBytes - FDocument.Actual;
-            if (BuffLen > FChunkBuff.Length) then
+            // Check Recv Read Len
+            if (BuffMax > 0) then
             begin
-              BuffLen := FChunkBuff.Length;
+              // Recv Max SOCK_MAX_CHUN Len
+              if (BuffMax > SOCK_MAX_CHUN) then
+              begin
+                BuffMax := SOCK_MAX_CHUN;
+              end;
+            end
+            else
+            begin
+              // FallBack To Default
+              BuffMax := FDocument.Initial;
             end;
-          end
-          else
-          begin
-            BuffLen := FChunkBuff.Length;
-          end;
 
-          FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, BuffLen, 0);
-          // Check Recieved
-          if (FChunkBuff.Actual > 0) then
-          begin
-            // Move Chunks To Buffer
-            WriteBuffer(FDocument, FChunkBuff, FDocument.Actual);
+            // Read Exactly That Count Of Bytes Then Stop
+            // BytesTotal Bytes Recv In This Routine Call
+            if (ReadBytes > 0) then
+            begin
+              // Calculate Remaining
+              BuffLen := ReadBytes - BytesTotal;
+              if (BuffLen > BuffMax) then
+              begin
+                BuffLen := BuffMax;
+              end;
+            end
+            else
+            begin
+              BuffLen := BuffMax;
+            end;
+
+            // Write Position Mainly For ShutDown Case
+            // Reset Only On Receive. ShutDown Appends Buffer
+            WritePoint := FDocument.Actual + BytesTotal;
+            // Resize Buffer If Needed
+            ResizeBuffer(FDocument, WritePoint + BuffLen);
+
+            BytesRead := recv(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(WritePoint))^, BuffLen, 0);
+            // Caclulate Total Bytes Received
+            if (BytesRead > 0) then
+            begin
+              Inc(BytesTotal, BytesRead);
+            end;
           end;
 
           // Stop When Done
-          if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (FChunkBuff.Actual = 0) or ((ReadBytes > 0) and (FDocument.Actual = ReadBytes)) then
+          if ((BytesRead = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
+            or (BytesRead = 0) or ((ReadBytes > 0) and (ReadBytes = BytesTotal)) then
           begin
             Break;
           end;
         end;
       end;
 
-      Result := (FDocument.Actual > 0);
+      // Check Receive Success
+      Result := (BytesTotal > 0);
     finally
+      // Set Buffer Actual Fill
+      Inc(FDocument.Actual, BytesTotal);
       // Detach Event
       WSAEventSelect(FSocket, EventHwnd, 0);
       // Close Event
@@ -654,55 +706,17 @@ begin
 end;
 
 procedure TSockClient.SocketClose(CloseGraceful: Boolean = False);
-var
-  EventHwnd: WSAEVENT;
-
 begin
   try
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
     try
-      // Check Timer
-      if (FTimerHwnd = 0) then Exit;
-
       // Connect Failed Skip ShutDown
       if (CloseGraceful = False) then Exit;
 
-      // Create Event
-      EventHwnd := WSACreateEvent;
-      // Check Event
-      if (EventHwnd = WSA_INVALID_EVENT) then Exit;
-
-      try
-        // Attach Event, Check Attached
-        if (WSAEventSelect(FSocket, EventHwnd, FD_CLOSE) <> SOCK_NO_ERROR) then Exit;
-
-        // Disable Socket Operations
-        if (shutdown(FSocket, SD_SEND) <> SOCK_NO_ERROR) then Exit;
-
-        // SlowDown Do Not Drain CPU. Watch For Abort
-        while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
-        begin
-          // SlowDown Do Not Drain CPU
-          if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
-          begin
-            FChunkBuff.Actual := recv(FSocket, Pointer(FChunkBuff.Buffer)^, FChunkBuff.Length, 0);
-
-            // Stop When Done
-            if ((FChunkBuff.Actual = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-              or (FChunkBuff.Actual = 0) then
-            begin
-              Break;
-            end;
-          end;
-        end;
-      finally
-        // Detach Event
-        WSAEventSelect(FSocket, EventHwnd, 0);
-        // Close Event
-        WSACloseEvent(EventHwnd);
-      end;
+      // ShutDown Graceful
+      SocketRead(0, True);
     finally
       // Close Graceful I Hope
       closesocket(FSocket);
@@ -857,12 +871,6 @@ begin
     ZeroMemory(FDocument.Buffer, FDocument.Length);
   end;
 
-  // Reset Chunk Buffer
-  if Assigned(FChunkBuff.Buffer) and (FChunkBuff.Length > 0) then
-  begin
-    ZeroMemory(FChunkBuff.Buffer, FChunkBuff.Length);
-  end;
-
   // Reset Errors
   if IsWinSockOk then
   begin
@@ -907,17 +915,17 @@ begin
     // Must Always Init Buffers
     if (BufferRec.Initial <= 0) then Exit;
 
-    // Calculate New Size
-    if (Needed > BufferRec.Initial) then
-      NewSize := ((Needed div BufferRec.Initial) + 1) * BufferRec.Initial
-    else if (Needed = 0) then
-      NewSize := Needed
-    else
-      NewSize := BufferRec.Initial;
-
     // Check Needed To Resize, Free Buffer
     if (Needed > BufferRec.Length) or (Needed = 0) then
     begin
+      // Calculate New Size
+      if (Needed > BufferRec.Initial) then
+        NewSize := ((Needed div BufferRec.Initial) + 1) * BufferRec.Initial
+      else if (Needed = 0) then
+        NewSize := Needed
+      else
+        NewSize := BufferRec.Initial;
+
       ReallocMem(BufferRec.Buffer, NewSize);
       BufferRec.Length := NewSize;
 
@@ -933,35 +941,32 @@ begin
   end;
 end;
 
-function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer; ChunkPos: Integer = 0): string;
+function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer): string;
 begin
   try
     Result := '';
 
-    if Assigned(BufferRec.Buffer) and (BufferRec.Actual > 0) and (ChunkSize > 0) then
+    // Check Valid
+    if Assigned(BufferRec.Buffer) and (BufferRec.Actual >= ChunkSize) and (ChunkSize > 0) then
     begin
-      if (ChunkPos < BufferRec.Actual) and (ChunkSize <= (BufferRec.Actual - ChunkPos)) then
-      begin
-        SetLength(Result, ChunkSize);
-        Move(Pointer(DWORD(BufferRec.Buffer) + DWORD(ChunkPos))^, Pointer(Result)^, ChunkSize);
-      end;
+      // Resize Result String
+      SetLength(Result, ChunkSize);
+      Move(Pointer(BufferRec.Buffer)^, Pointer(Result)^, ChunkSize);
     end;
   except
     Result := '';
   end;
 end;
 
-procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer;
-  ChunkSize: Integer; ChunkPos: Integer = 0); overload;
+procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer; ChunkSize: Integer); overload;
 begin
   try
-    if Assigned(BufferRec.Buffer) and (BufferRec.Actual > 0)
+    // Check Valid
+    if Assigned(BufferRec.Buffer) and (BufferRec.Actual >= ChunkSize)
       and Assigned(BuffData) and (ChunkSize > 0) then
     begin
-      if (ChunkPos < BufferRec.Actual) and (ChunkSize <= (BufferRec.Actual - ChunkPos)) then
-      begin
-        Move(Pointer(DWORD(BufferRec.Buffer) + DWORD(ChunkPos))^, BuffData^, ChunkSize);
-      end;
+      // Watch For BuffData Size
+      Move(Pointer(BufferRec.Buffer)^, BuffData^, ChunkSize);
     end;
   except
     //
@@ -975,6 +980,7 @@ var
 
 begin
   try
+    // Check Valid
     if Assigned(BufferRec.Buffer) and (BufferRec.Length > 0)
       and Assigned(BuffData) and (BuffLen > 0) then
     begin
@@ -993,37 +999,6 @@ begin
         // Move Chunk, Adjust Position Marker
         Move(BuffData^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, BuffLen);
         BufferRec.Actual := WritePos + BuffLen;
-      end;
-    end;
-  except
-    //
-  end;
-end;
-
-procedure WriteBuffer(var BufferRec, ChunkBuff: TBufferRec; WritePos: Integer = 0);
-var
-  NeededLen: Integer;
-
-begin
-  try
-    if Assigned(BufferRec.Buffer) and (BufferRec.Length > 0)
-      and Assigned(ChunkBuff.Buffer) and (ChunkBuff.Actual > 0) then
-    begin
-      // Calculate Buffer Resize
-      if ((BufferRec.Length - WritePos) < ChunkBuff.Actual) then
-        NeededLen := BufferRec.Length + (ChunkBuff.Actual - (BufferRec.Length - WritePos))
-      else
-        NeededLen := ChunkBuff.Actual;
-
-      // Resize If Needed
-      ResizeBuffer(BufferRec, NeededLen);
-
-      // Check Resized
-      if (BufferRec.Length >= NeededLen) then
-      begin
-        // Move Chunk, Adjust Position Marker
-        Move(Pointer(ChunkBuff.Buffer)^, Pointer(DWORD(BufferRec.Buffer) + DWORD(WritePos))^, ChunkBuff.Actual);
-        BufferRec.Actual := WritePos + ChunkBuff.Actual;
       end;
     end;
   except
