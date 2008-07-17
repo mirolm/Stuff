@@ -156,7 +156,7 @@ const
 
 const
   INET_BUFF_LEN = 1024;      // Buffer Resize Step
-  SOCK_MAX_CHUN = 65536;     // Max Packet Size
+  SOCK_MAX_CHUN = 65535;     // Max Packet Size
   TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
   SOCK_NO_ERROR = 0;         // WinSock Success
 
@@ -715,7 +715,7 @@ begin
       // Connect Failed Skip ShutDown
       if (CloseGraceful = False) then Exit;
 
-      // ShutDown Graceful
+      // ShutDown Graceful Read Before Close
       SocketRead(0, True);
     finally
       // Close Graceful I Hope
@@ -891,7 +891,7 @@ end;
 function TSockClient.GetDocument: string;
 begin
   try
-    Result := ReadBuffer(FDocument, FDocument.Actual)
+    Result := ReadBuffer(FDocument, FDocument.Actual);
   except
     Result := '';
   end;
