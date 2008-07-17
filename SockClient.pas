@@ -34,9 +34,6 @@ type
   TSocket            = u_int;
 
 const
-  WSADESCRIPTION_LEN = 256;
-  WSASYS_STATUS_LEN  = 128;
-
   AF_INET            = 2;
   SOCK_STREAM        = 1;
   IPPROTO_TCP        = 6;
@@ -48,7 +45,7 @@ const
   INVALID_SOCKET     = TSocket(not(0));
   INADDR_NONE        = $FFFFFFFF;
   WSABASEERR         = 10000;
-  WSAEWOULDBLOCK     = (WSABASEERR + 35);
+  WSAEWOULDBLOCK     = 10035;
 
   FD_CONNECT         = $10;
   FD_WRITE           = $02;
@@ -84,8 +81,8 @@ type
   TWSAData = packed record
     wVersion: Word;
     wHighVersion: Word;
-    szDescription: array[0..WSADESCRIPTION_LEN] of Char;
-    szSystemStatus: array[0..WSASYS_STATUS_LEN] of Char;
+    szDescription: array[0..256] of Char;
+    szSystemStatus: array[0..128] of Char;
     iMaxSockets: Word;
     iMaxUdpDg: Word;
     lpVendorInfo: PChar;
@@ -98,8 +95,8 @@ type
     h_addrtype: Smallint;
     h_length: Smallint;
     case Integer of
-     0: (h_addr_list: ^PChar);
-     1: (h_addr: ^PInAddr);
+      0: (h_addr_list: ^PChar);
+      1: (h_addr: ^PInAddr);
   end;
 
 // -------------------------------------------------------------------------- //
