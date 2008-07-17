@@ -26,12 +26,12 @@ uses Windows;
 // -------------------------------------------------------------------------- //
 
 type
-  u_int    = Integer;
-  u_short  = Word;
-  u_long   = Longint;
+  u_int              = Integer;
+  u_short            = Word;
+  u_long             = Longint;
 
-  WSAEVENT = THandle;
-  TSocket  = u_int;
+  WSAEVENT           = THandle;
+  TSocket            = u_int;
 
 const
   WSADESCRIPTION_LEN = 256;
@@ -260,10 +260,10 @@ type
   procedure FreeLib;
 
 var
-  IsWinSockOk : Boolean = False;
-  WSAData     : TWSAData;
+  IsWinSockOk: Boolean = False;
+  WSAData: TWSAData;
 
-  WSLibHandle : THandle = 0;
+  WSLibHandle: THandle = 0;
 
   WSAStartup: TWSAStartup = nil;
   WSACleanup: TWSACleanup = nil;
@@ -974,8 +974,7 @@ begin
   end;
 end;
 
-procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer;
-  BuffLen: Integer; WritePos: Integer = 0);
+procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer; BuffLen: Integer; WritePos: Integer = 0);
 var
   NeededLen: Integer;
 
