@@ -37,28 +37,28 @@ const
   WSADESCRIPTION_LEN = 256;
   WSASYS_STATUS_LEN  = 128;
 
-  AF_INET     = 2;
-  SOCK_STREAM = 1;
-  IPPROTO_TCP = 6;
-  FIONREAD    = $4004667F;
-  FIONBIO     = $8004667E;
+  AF_INET            = 2;
+  SOCK_STREAM        = 1;
+  IPPROTO_TCP        = 6;
+  FIONREAD           = $4004667F;
+  FIONBIO            = $8004667E;
 
-  SOCKET_ERROR      = -1;
-  WSA_INVALID_EVENT = WSAEVENT(nil);
-  INVALID_SOCKET    = TSocket(not(0));
-  INADDR_NONE       = $FFFFFFFF;
-  WSABASEERR        = 10000;
-  WSAEWOULDBLOCK    = (WSABASEERR + 35);
+  SOCKET_ERROR       = -1;
+  WSA_INVALID_EVENT  = WSAEVENT(nil);
+  INVALID_SOCKET     = TSocket(not(0));
+  INADDR_NONE        = $FFFFFFFF;
+  WSABASEERR         = 10000;
+  WSAEWOULDBLOCK     = (WSABASEERR + 35);
 
-  FD_CONNECT = $10;
-  FD_WRITE   = $02;
-  FD_READ    = $01;
-  FD_CLOSE   = $20;
+  FD_CONNECT         = $10;
+  FD_WRITE           = $02;
+  FD_READ            = $01;
+  FD_CLOSE           = $20;
 
-  SD_SEND    = $01;
+  SD_SEND            = $01;
 
-  SOL_SOCKET = $FFFF;
-  SO_ERROR   = $1007;
+  SOL_SOCKET         = $FFFF;
+  SO_ERROR           = $1007;
 
 type
   PInAddr = ^TInAddr;
@@ -295,15 +295,15 @@ begin
   inherited Create;
 
   FTimeout := 60000;
-
-  // Init Buffers
-  ResizeBuffer(FDocument, INET_BUFF_LEN, INET_BUFF_LEN);
-
   FTargetHost := '';
   FTargetPort := 0;
+
   FProxyHost := '';
   FProxyPort := 1080;
   FResolver := False;
+
+  // Init Buffers
+  ResizeBuffer(FDocument, INET_BUFF_LEN, INET_BUFF_LEN);
 
   // Init Socket
   SocketReset;
@@ -563,7 +563,7 @@ begin
 
           // Stop When Done
           if ((BytesSent = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (BytesSent = 0) then
+            or (BytesSent = 0) or (BytesTotal = FDocument.Actual) then
           begin
             Break;
           end;
@@ -858,6 +858,7 @@ procedure TSockClient.SocketReset;
 begin
   // Reset Socket
   FSocket := INVALID_SOCKET;
+
   // Reset Timer
   FTimerHwnd := INVALID_HANDLE_VALUE;
 
