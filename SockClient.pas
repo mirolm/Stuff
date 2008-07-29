@@ -26,52 +26,23 @@ uses Windows;
 // -------------------------------------------------------------------------- //
 
 type
-  u_int              = Integer;
-  u_short            = Word;
-  u_long             = Longint;
+  WSAEVENT = THandle;
+  TSocket = Integer;
 
-  WSAEVENT           = THandle;
-  TSocket            = u_int;
-
-const
-  AF_INET            = 2;
-  SOCK_STREAM        = 1;
-  IPPROTO_TCP        = 6;
-  FIONREAD           = $4004667F;
-  FIONBIO            = $8004667E;
-
-  SOCKET_ERROR       = -1;
-  WSA_INVALID_EVENT  = WSAEVENT(nil);
-  INVALID_SOCKET     = TSocket(not(0));
-  INADDR_NONE        = $FFFFFFFF;
-  WSABASEERR         = 10000;
-  WSAEWOULDBLOCK     = 10035;
-
-  FD_CONNECT         = $10;
-  FD_WRITE           = $02;
-  FD_READ            = $01;
-  FD_CLOSE           = $20;
-
-  SD_SEND            = $01;
-
-  SOL_SOCKET         = $FFFF;
-  SO_ERROR           = $1007;
-
-type
   PInAddr = ^TInAddr;
   TInAddr = packed record
     case Integer of
       0: (S_bytes: packed array [0..3] of Byte);
-      1: (S_addr: u_long);
+      1: (S_addr: Longint);
   end;
 
   TSockAddrIn = packed record
     case Integer of
-      0: (sin_family: u_short;
-          sin_port: u_short;
+      0: (sin_family: Word;
+          sin_port: Word;
           sin_addr: TInAddr;
           sin_zero: array[0..7] of Char);
-      1: (sa_family: u_short;
+      1: (sa_family: Word;
           sa_data: array[0..13] of Char)
   end;
 
@@ -99,6 +70,29 @@ type
       1: (h_addr: ^PInAddr);
   end;
 
+const
+  AF_INET           = 2;
+  SOCK_STREAM       = 1;
+  IPPROTO_TCP       = 6;
+  FIONREAD          = $4004667F;
+  FIONBIO           = $8004667E;
+
+  SOCKET_ERROR      = -1;
+  WSA_INVALID_EVENT = WSAEVENT(nil);
+  INVALID_SOCKET    = TSocket(not(0));
+  INADDR_NONE       = $FFFFFFFF;
+  WSAEWOULDBLOCK    = 10035;
+
+  FD_CONNECT        = $10;
+  FD_WRITE          = $02;
+  FD_READ           = $01;
+  FD_CLOSE          = $20;
+
+  SD_SEND           = $01;
+
+  SOL_SOCKET        = $FFFF;
+  SO_ERROR          = $1007;
+
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -119,10 +113,10 @@ type
   TCloseSocket = function(s: TSocket): Integer; stdcall;
   TWSACreateEvent = function: WSAEVENT; stdcall;
   TWSAEventSelect = function(s: TSOCKET; hEventObject: WSAEVENT;
-    lNetworkEvents: u_long): u_int; stdcall;
+    lNetworkEvents: Longint): Integer; stdcall;
   TWSACloseEvent = function(hEvent: WSAEVENT):BOOL; stdcall;
-  Thtons = function(hostshort: u_short): u_short; stdcall;
-  TInet_addr = function(cp: PChar): u_long; stdcall;
+  Thtons = function(hostshort: Word): Word; stdcall;
+  TInet_addr = function(cp: PChar): Longint; stdcall;
   TGetHostByName = function(name: PChar): PHostEnt; stdcall;
 
 const
@@ -253,7 +247,7 @@ type
   function ReleaseLib(var LibHandle: THandle): Boolean;
 
   // Init Routines
-  function InitLib: Boolean;
+  procedure InitLib;
   procedure FreeLib;
 
 var
@@ -739,7 +733,7 @@ begin
     // Convert IP To Network Byte Order
     Result := inet_addr(PChar(TargetHost));
     // Convert Failed This Is Host
-    if (Result = u_long(INADDR_NONE)) then
+    if (Result = Longint(INADDR_NONE)) then
     begin
       // Convert Host To Network Byte Order
       HostEnt := gethostbyname(PChar(TargetHost));
@@ -816,7 +810,7 @@ var
 begin
   try
     // Set Default Error
-    Result := WSABASEERR;
+    Result := SOCKET_ERROR;
 
     // Check WinSock2 Init
     if IsWinSockOk then
@@ -845,7 +839,7 @@ begin
       end;
     end;
   except
-    Result := WSABASEERR;
+    Result := SOCKET_ERROR;
   end;
 
   FResultCode := Result;
@@ -1035,10 +1029,10 @@ begin
   end;
 end;
 
-function InitLib: Boolean;
+procedure InitLib;
 begin
   try
-    Result := False;
+    IsWinSockOk := False;
 
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSAStartup, FUN_WSA_STARTUP) = False) then Exit;
@@ -1063,9 +1057,9 @@ begin
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
     // Startup WinSock2
-    Result := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
+    IsWinSockOk := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
   except
-    Result := False;
+    IsWinSockOk := False;
   end;
 end;
 
@@ -1103,7 +1097,7 @@ begin
 end;
 
 initialization
-  IsWinSockOk := InitLib;
+  InitLib;
 
 finalization
   FreeLib;
