@@ -216,9 +216,12 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    // Simple Request Routines
-    function SocketRequest(const Request: string): Boolean;
-    procedure SocketAbort;
+    // Multi Request Stuff
+    function OpenConnection: Boolean;
+    function SendString(const Request: string; ReadBytes: Integer = 0): Boolean;
+    procedure CloseConnection(CloseGraceful: Boolean);
+    // Simple Request Stuff
+    function SimpleRequest(const Request: string): Boolean;
 
     // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
@@ -303,7 +306,7 @@ end;
 destructor TSockClient.Destroy;
 begin
   // Force Request Abort
-  SocketAbort;
+  TimerAbort;
   // Destroy Socket
   SocketClose;
 
@@ -744,7 +747,72 @@ begin
   end;
 end;
 
-function TSockClient.SocketRequest(const Request: string): Boolean;
+function TSockClient.OpenConnection: Boolean;
+begin
+  try
+    Result := False;
+
+    // Prepare Socket
+    SocketReset;
+
+    // Just To Be Sure
+    if (IsWinSockOk = False) then Exit;
+
+    // Trigger Timeout Timer
+    if (TimerStart(FTimeout) = False) then Exit;
+
+    // Check SOCKS Proxy Attached
+    if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
+    begin
+      // Connect To SOCKS Proxy
+      if (SocketConnect(FProxyHost, FProxyPort) = False) then Exit;
+      // Create Tunnel To Target Host
+      if (ProxyConnect(FTargetHost, FTargetPort) = False) then Exit;
+    end
+    else
+    begin
+      // Connect To Target Host
+      if (SocketConnect(FTargetHost, FTargetPort) = False) then Exit;
+    end;
+
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+function TSockClient.SendString(const Request: string; ReadBytes: Integer = 0): Boolean;
+begin
+  try
+    Result := False;
+
+    // Write Request To Buffer
+    WriteBuffer(FDocument, Pointer(Request), Length(Request));
+
+    // Send Request
+    if (SocketWrite = False) then Exit;
+    // Recieve Result
+    if (SocketRead(ReadBytes) = False) then Exit;
+
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+procedure TSockClient.CloseConnection(CloseGraceful: Boolean);
+begin
+  try
+    // Disconnect Close Socket
+    SocketClose(CloseGraceful);
+    // Abort Timeout Timer
+    TimerAbort;
+  except
+    //
+  end;
+end;
+
+function TSockClient.SimpleRequest(const Request: string): Boolean;
 var
   CloseGraceful: Boolean;
 
@@ -755,47 +823,17 @@ begin
     // Force Hard Socket Close
     CloseGraceful := False;
 
-    // Prepare Socket
-    SocketReset;
-
-    // Just To Be Sure
-    if (IsWinSockOk = False) then Exit;
-
     try
-      // Trigger Timeout Timer
-      if (TimerStart(FTimeout) = False) then Exit;
-
-      // Check SOCKS Proxy Attached
-      if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
-      begin
-        // Connect To SOCKS Proxy
-        if (SocketConnect(FProxyHost, FProxyPort) = False) then Exit;
-        // Create Tunnel To Target Host
-        if (ProxyConnect(FTargetHost, FTargetPort) = False) then Exit;
-      end
-      else
-      begin
-        // Connect To Target Host
-        if (SocketConnect(FTargetHost, FTargetPort) = False) then Exit;
-      end;
+      if (OpenConnection() = False) then Exit;
 
       // Connected Close Graceful
       CloseGraceful := True;
 
-      // Write Request To Buffer
-      WriteBuffer(FDocument, Pointer(Request), Length(Request));
-
-      // Send Request
-      if (SocketWrite = False) then Exit;
-      // Recieve Result
-      if (SocketRead = False) then Exit;
+      if (SendString(Request) = False) then Exit;
 
       Result := True;
     finally
-      // Disconnect Close Socket
-      SocketClose(CloseGraceful);
-      // Abort Timeout Timer
-      TimerAbort;
+      CloseConnection(CloseGraceful);
     end;
   except
     Result := False;
@@ -867,15 +905,6 @@ begin
   if IsWinSockOk then
   begin
     WSASetLastError(SOCK_NO_ERROR);
-  end;
-end;
-
-procedure TSockClient.SocketAbort;
-begin
-  try
-    TimerAbort;
-  except
-    //
   end;
 end;
 
