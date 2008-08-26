@@ -192,7 +192,7 @@ type
 function MySqlEscapeString(const InputStr: string; ToHex: Boolean = False): string;
 
 // Loader Routines
-function InitLib: Boolean;
+procedure InitLib;
 procedure FreeLib;
 
 function LoadLib(var LibHandle: THandle; const LibName: string): Boolean;
@@ -808,9 +808,9 @@ begin
   end;
 end;
 
-function InitLib: Boolean;
+procedure InitLib;
 begin
-  Result := False;
+  IsMySQLOk := False;
 
   try
     if (LoadLib(MySQLHandle, LIB_MYSQL) = False) then Exit;
@@ -836,9 +836,9 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_num_fields, FUN_MYSQL_NUM_FIELDS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_field_direct, FUN_MYSQL_FETCH_FIELD_DIRECT) = False) then Exit;
 
-    Result := True;
+    IsMySQLOk := True;
   except
-    Result := False;
+    IsMySQLOk := False;
   end;
 end;
 
@@ -873,7 +873,7 @@ end;
 
 initialization
   // Get Library Init Status
-  IsMySQLOk := InitLib();
+  InitLib();
 
 finalization
   // Detach From Library
