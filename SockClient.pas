@@ -556,8 +556,8 @@ begin
           end;
 
           // Stop When Done
-          if ((BytesSent = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (BytesSent = 0) or (BytesTotal = FDocument.Actual) then
+          if (((BytesSent = SOCKET_ERROR) or (BytesSent = 0)) and (SocketError <> WSAEWOULDBLOCK))
+            or (BytesTotal = FDocument.Actual) then
           begin
             Break;
           end;
@@ -627,22 +627,15 @@ begin
         begin
           // Reset To Be Sure
           BytesRead := SOCKET_ERROR;
+          // Reset To Be Sure
+          BuffMax := 0;
           // Stream Bigger Chunks
           if (ioctlsocket(FSocket, FIONREAD, BuffMax) = SOCK_NO_ERROR) then
           begin
             // Check Recv Read Len
-            if (BuffMax > 0) then
+            if (BuffMax > SOCK_MAX_CHUN) then
             begin
-              // Recv Max SOCK_MAX_CHUN Len
-              if (BuffMax > SOCK_MAX_CHUN) then
-              begin
-                BuffMax := SOCK_MAX_CHUN;
-              end;
-            end
-            else
-            begin
-              // FallBack To Default
-              BuffMax := FDocument.Initial;
+              BuffMax := SOCK_MAX_CHUN;
             end;
 
             // Read Exactly That Count Of Bytes Then Stop
@@ -676,8 +669,8 @@ begin
           end;
 
           // Stop When Done
-          if ((BytesRead = SOCKET_ERROR) and (SocketError <> WSAEWOULDBLOCK))
-            or (BytesRead = 0) or ((ReadBytes > 0) and (ReadBytes = BytesTotal)) then
+          if (((BytesRead = SOCKET_ERROR) or (BytesRead = 0)) and (SocketError <> WSAEWOULDBLOCK))
+            or ((ReadBytes > 0) and (ReadBytes = BytesTotal)) then
           begin
             Break;
           end;
