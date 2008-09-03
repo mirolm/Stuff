@@ -583,7 +583,6 @@ function TSockClient.SocketRead(MsgRecv: Boolean = False; SockShut: Boolean = Fa
 var
   EventHwnd  : WSAEVENT;
   BuffLen    : Integer;
-  BuffMax    : Integer;
   BytesRead  : Integer;
   BytesTotal : Integer;
   WritePoint : Integer;
