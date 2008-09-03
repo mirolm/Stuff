@@ -206,7 +206,7 @@ type
     procedure SocketClose(CloseGraceful: Boolean = False);
     // Socket Operations
     function SocketWrite: Boolean;
-    function SocketRead(ReadBytes: Integer = 0; SockShut: Boolean = False): Boolean;
+    function SocketRead(MsgRecv: Boolean = False; SockShut: Boolean = False): Boolean;
     // Socket Errors
     function SocketError: Integer;
     procedure SocketReset;
@@ -218,7 +218,7 @@ type
 
     // Multi Request Stuff
     function OpenConnection: Boolean;
-    function SendString(const Request: string; ReadBytes: Integer = 0): Boolean;
+    function SendString(const Request: string; MsgRecv: Boolean = False): Boolean;
     procedure CloseConnection(CloseGraceful: Boolean);
     // Simple Request Stuff
     function SimpleRequest(const Request: string): Boolean;
@@ -483,7 +483,9 @@ begin
     // Send Request
     if (SocketWrite = False) then Exit;
     // Recieve Only Result Struct
-    if (SocketRead(SizeOf(SocksOut)) = False) then Exit;
+    if (SocketRead(True) = False) then Exit;
+    // Prevent Memory Corruption
+    if (FDocument.Actual <> SizeOf(SocksOut)) then Exit;
 
     // Clear Records
     ZeroMemory(@SocksOut, SizeOf(SocksOut));
@@ -577,7 +579,7 @@ begin
   end;
 end;
 
-function TSockClient.SocketRead(ReadBytes: Integer = 0; SockShut: Boolean = False): Boolean;
+function TSockClient.SocketRead(MsgRecv: Boolean = False; SockShut: Boolean = False): Boolean;
 var
   EventHwnd  : WSAEVENT;
   BuffLen    : Integer;
@@ -589,7 +591,7 @@ var
 begin
   try
     Result := False;
-    // Botal Bytes Recv
+    // Total Bytes Recv
     BytesTotal := 0;
 
     // Check Timer
@@ -628,30 +630,15 @@ begin
           // Reset To Be Sure
           BytesRead := SOCKET_ERROR;
           // Reset To Be Sure
-          BuffMax := 0;
+          BuffLen := 0;
+
           // Stream Bigger Chunks
-          if (ioctlsocket(FSocket, FIONREAD, BuffMax) = SOCK_NO_ERROR) then
+          if (ioctlsocket(FSocket, FIONREAD, BuffLen) = SOCK_NO_ERROR) then
           begin
             // Check Recv Read Len
-            if (BuffMax > SOCK_MAX_CHUN) then
+            if (BuffLen > SOCK_MAX_CHUN) then
             begin
-              BuffMax := SOCK_MAX_CHUN;
-            end;
-
-            // Read Exactly That Count Of Bytes Then Stop
-            // BytesTotal Bytes Recv In This Routine Call
-            if (ReadBytes > 0) then
-            begin
-              // Calculate Remaining
-              BuffLen := ReadBytes - BytesTotal;
-              if (BuffLen > BuffMax) then
-              begin
-                BuffLen := BuffMax;
-              end;
-            end
-            else
-            begin
-              BuffLen := BuffMax;
+              BuffLen := SOCK_MAX_CHUN;
             end;
 
             // Write Position Mainly For ShutDown Case
@@ -669,8 +656,10 @@ begin
           end;
 
           // Stop When Done
-          if (((BytesRead = SOCKET_ERROR) or (BytesRead = 0)) and (SocketError <> WSAEWOULDBLOCK))
-            or ((ReadBytes > 0) and (ReadBytes = BytesTotal)) then
+          // Stream  - Stop On All Except WSAEWOULDBLOCK
+          // Message - WSAEWOULDBLOCK Waiting For Request
+          if (((BytesRead = SOCKET_ERROR) or (BytesRead = 0))
+            and ((MsgRecv = True) or (SocketError <> WSAEWOULDBLOCK))) then
           begin
             Break;
           end;
@@ -703,7 +692,7 @@ begin
       if (CloseGraceful = False) then Exit;
 
       // ShutDown Graceful Read Before Close
-      SocketRead(0, True);
+      SocketRead(False, True);
     finally
       // Close Graceful I Hope
       closesocket(FSocket);
@@ -774,7 +763,7 @@ begin
   end;
 end;
 
-function TSockClient.SendString(const Request: string; ReadBytes: Integer = 0): Boolean;
+function TSockClient.SendString(const Request: string; MsgRecv: Boolean = False): Boolean;
 begin
   try
     Result := False;
@@ -785,7 +774,7 @@ begin
     // Send Request
     if (SocketWrite = False) then Exit;
     // Recieve Result
-    if (SocketRead(ReadBytes) = False) then Exit;
+    if (SocketRead(MsgRecv) = False) then Exit;
 
     Result := True;
   except
