@@ -288,12 +288,13 @@ constructor TSockClient.Create;
 begin
   inherited Create;
 
+  // Init Conn Fields
   FTimeout := 60000;
   FTargetHost := '';
   FTargetPort := 0;
 
   FProxyHost := '';
-  FProxyPort := 1080;
+  FProxyPort := 0;
   FResolver := False;
 
   // Init Buffers
@@ -482,9 +483,9 @@ begin
 
     // Send Request
     if (SocketWrite = False) then Exit;
-    // Recieve Only Result Struct
+    // Recieve Only Result Struct Message Recv
     if (SocketRead(True) = False) then Exit;
-    // Prevent Memory Corruption
+    // Check Size Prevent Memory Corruption
     if (FDocument.Actual <> SizeOf(SocksOut)) then Exit;
 
     // Clear Records
@@ -691,6 +692,7 @@ begin
       if (CloseGraceful = False) then Exit;
 
       // ShutDown Graceful Read Before Close
+      // Stream Recv By Default
       SocketRead(False, True);
     finally
       // Close Graceful I Hope
@@ -772,7 +774,7 @@ begin
 
     // Send Request
     if (SocketWrite = False) then Exit;
-    // Recieve Result
+    // Recieve Result Customize Recv Type
     if (SocketRead(MsgRecv) = False) then Exit;
 
     Result := True;
@@ -805,15 +807,18 @@ begin
     CloseGraceful := False;
 
     try
+      // Make Connection
       if (OpenConnection() = False) then Exit;
 
       // Connected Close Graceful
       CloseGraceful := True;
 
+      // Use Stream Recv
       if (SendString(Request) = False) then Exit;
 
       Result := True;
     finally
+      // Close Stuff
       CloseConnection(CloseGraceful);
     end;
   except
@@ -892,6 +897,7 @@ end;
 function TSockClient.GetDocument: string;
 begin
   try
+    // Read Temporary Buffer
     Result := ReadBuffer(FDocument, FDocument.Actual);
   except
     Result := '';
@@ -1044,6 +1050,7 @@ begin
   try
     IsWinSockOk := False;
 
+    // Attach To DLL, Get Routines
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSAStartup, FUN_WSA_STARTUP) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSACleanup, FUN_WSA_CLEANUP) = False) then Exit;
@@ -1081,6 +1088,7 @@ begin
     // Shut Down WinSock2
     WSACleanup;
 
+    // Cleanup Routines
     WSAStartup := nil;
     WSACleanup := nil;
     WSAGetLastError := nil;
@@ -1100,6 +1108,7 @@ begin
     inet_addr := nil;
     gethostbyname := nil;
 
+    // Detach From DLL
     ReleaseLib(WSLibHandle);
   except
     IsWinSockOk := False;
