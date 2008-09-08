@@ -1,5 +1,5 @@
 // LightWeight Delphi Library For MySQL.
-// Copyright (C) 2008 Miroslav Marchev
+// Copyright (C) 2008 Miroslav Marchev (http://blog.ieti.eu/)
 
 // This program is free software; you can redistribute it and/or
 // modify it under the terms of the GNU General Public License
