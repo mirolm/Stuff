@@ -81,7 +81,7 @@ const
   FUN_MYSQL_FETCH_ROW          = 'mysql_fetch_row';
   FUN_MYSQL_FETCH_LENGTHS      = 'mysql_fetch_lengths';
   FUN_MYSQL_NUM_FIELDS         = 'mysql_num_fields';
-  FUN_MYSQL_FETCH_FIELD_DIRECT = 'mysql_fetch_field_direct';
+  FUN_MYSQL_FETCH_FIELDS       = 'mysql_fetch_fields';
 
 const
   MYSQL_OPT_RECONNECT          = 20; // Attempt Auto Reconnect
@@ -109,7 +109,7 @@ type
   TMySqlFetchRow = function(result: PMYSQL_RES): MYSQL_ROW; stdcall;
   TMySqlFetchLengths = function(result: PMYSQL_RES): PLongWord; stdcall;
   TMySqlNumFields = function(result: PMYSQL_RES): Cardinal; stdcall;
-  TMySqlFetchFieldDirect = function(result: PMYSQL_RES; fieldnr: Cardinal): PMYSQL_FIELD; stdcall;
+  TMySqlFetchFields = function(result: PMYSQL_RES): PMYSQL_FIELD; stdcall;
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -136,6 +136,13 @@ const
 // -------------------------------------------------------------------------- //
 
 type
+  PCacheItem = ^TCacheItem;
+  TCacheItem = record
+    CacheName : string;
+    CacheIdx  : Integer;
+  end;
+
+type
   TMySQLConnection = class
   private
     // Connection
@@ -150,6 +157,7 @@ type
     FResultRow: MYSQL_ROW;
     FResultLenghts: PLongWord;
     FFieldNames: array of string;
+    FFieldCache: array of PCacheItem;
     // Other
     FTag: Integer;
 
@@ -159,6 +167,10 @@ type
     procedure GetFieldNames;
     function GetFieldIndex(const FieldName: string): Integer;
     function GetFieldValue(const FieldName: string): string;
+    // Used Fields Cache
+    function GetCacheIndex(const FieldName: string): Integer;
+    procedure AddToFieldCache(const FieldName: string; FieldIndex: Integer);
+    procedure ClearFieldCache;
   public
     constructor Create(const ServerHost: string; ServerPort: Cardinal;
       const DBSchema, UserName, Password: string);
@@ -227,7 +239,7 @@ var
   mysql_fetch_row: TMySqlFetchRow = nil;
   mysql_fetch_lengths: TMySqlFetchLengths = nil;
   mysql_num_fields: TMySqlNumFields = nil;
-  mysql_fetch_field_direct: TMySqlFetchFieldDirect = nil;
+  mysql_fetch_fields: TMySqlFetchFields = nil;
 
 implementation
 
@@ -261,7 +273,8 @@ begin
   FQueryResult := nil;
   FResultRow := nil;
   FResultLenghts := nil;
-  SetLength(FFieldNames, 0);
+  // Clear Field Cache
+  ClearFieldCache;
 
   // Keeps Pool ConnectionId
   FTag := DEF_NO_CONN;
@@ -540,7 +553,8 @@ begin
     FQueryResult := nil;
     FResultRow := nil;
     FResultLenghts := nil;
-    SetLength(FFieldNames, 0);
+    // Clear Field Cache
+    ClearFieldCache;
   end;
 end;
 
@@ -591,18 +605,22 @@ end;
 procedure TMySQLConnection.GetFieldNames;
 var
   FieldCount : Cardinal;
+  Fields     : PMYSQL_FIELD;
   i          : Cardinal;
-  Field      : PMYSQL_FIELD;
 
 begin
   if Assigned(FQueryResult) then
   begin
     // Get Query Field Count
     FieldCount := mysql_num_fields(FQueryResult);
-    if (FieldCount > 0) then
+    // Get Fields Array
+    Fields := mysql_fetch_fields(FQueryResult);
+    // Check Fields Retrieved
+    if (Assigned(Fields) = True) and (FieldCount > 0) then
     begin
+      // Resize Array
       SetLength(FFieldNames, FieldCount);
-
+      // Cycle All Items
       for i := Low(FFieldNames) to High(FFieldNames) do
       begin
         // Set By Default
@@ -610,17 +628,16 @@ begin
 
         // Many Select Queries May Lead
         // To Memory Fragmentation
-        Field := mysql_fetch_field_direct(FQueryResult, i);
-        if Assigned(Field) then
+        if Assigned(Fields^.name) and (Fields^.name_length > 0) then
         begin
           // Transfer Names To Array
-          if Assigned(Field^.name) and (Field^.name_length > 0) then
-          begin
-            // May Occur Fragmentation
-            SetLength(FFieldNames[i], Field^.name_length);
-            Move(Pointer(Field^.name)^, Pointer(FFieldNames[i])^, Field^.name_length);
-          end;
+          // May Occur Fragmentation
+          SetLength(FFieldNames[i], Fields^.name_length);
+          Move(Pointer(Fields^.name)^, Pointer(FFieldNames[i])^, Fields^.name_length);
         end;
+
+        // Move To Next Field Record
+        Inc(Fields);
       end;
     end;
   end;
@@ -632,19 +649,26 @@ var
   FieldDest : string;
 
 begin
-  Result := DEF_NO_CONN;
-
-  // Field Names Cached To Speed Up
-  for i := Low(FFieldNames) to High(FFieldNames) do
+  // Get From Cache
+  Result := GetCacheIndex(FieldName);
+  // Chech Exists In Cache
+  if (Result = DEF_NO_CONN) then
   begin
-    FieldDest := FFieldNames[i];
-
-    // Hope Compare Is Fast Enought
-    if AnsiSameText(FieldName, FieldDest) then
+    // Field Names Cached To Speed Up
+    for i := Low(FFieldNames) to High(FFieldNames) do
     begin
-      Result := i;
-      // Leave Loop Field Found
-      Break;
+      FieldDest := FFieldNames[i];
+
+      // Hope Compare Is Fast Enought
+      if AnsiSameText(FieldName, FieldDest) then
+      begin
+        // Add Field To Cache
+        AddToFieldCache(FieldName, i);
+        // Return Index
+        Result := i;
+        // Leave Loop Field Found
+        Break;
+      end;
     end;
   end;
 end;
@@ -653,7 +677,7 @@ function TMySQLConnection.GetFieldValue(const FieldName: string): string;
 var
   FieldIndex : Integer;
   PDataRow   : MYSQL_ROW;
-  ResultPrt  : PChar;
+  ResultPtr  : PChar;
   PDataLen   : PLongWord;
   ResultLen  : LongWord;
 
@@ -674,15 +698,90 @@ begin
       Inc(PDataLen, FieldIndex);
 
       // Retrieve Value And Length
-      ResultPrt := PDataRow^;
+      ResultPtr := PDataRow^;
       ResultLen := PDataLen^;
 
       // Copy Field Value
-      if Assigned(ResultPrt) and (ResultLen > 0) then
+      if (Assigned(ResultPtr) = True) and (ResultLen > 0) then
       begin
         // May Occur Fragmentation
         SetLength(Result, ResultLen);
-        Move(Pointer(ResultPrt)^, Pointer(Result)^, ResultLen);
+        Move(Pointer(ResultPtr)^, Pointer(Result)^, ResultLen);
+      end;
+    end;
+  end;
+end;
+
+// Used Fields Cache
+procedure TMySQLConnection.AddToFieldCache(const FieldName: string; FieldIndex: Integer);
+var
+  CacheItem: PCacheItem;
+
+begin
+  try
+    // Populate Cache Item
+    New(CacheItem);
+    if Assigned(CacheItem) then
+    begin
+      CacheItem^.CacheName := FieldName;
+      CacheItem^.CacheIdx := FieldIndex;
+      // Resize Array
+      SetLength(FFieldCache, High(FFieldCache) + 2);
+      // Add Item
+      FFieldCache[High(FFieldCache)] := CacheItem;
+    end;
+  except
+    //
+  end;
+end;
+
+procedure TMySQLConnection.ClearFieldCache;
+var
+  i         : Integer;
+  CacheItem : PCacheItem;
+
+begin
+  try
+    // Dispose Items
+    for i := Low(FFieldCache) to High(FFieldCache) do
+    begin
+      CacheItem := FFieldCache[i];
+      if Assigned(CacheItem) then
+      begin
+        Dispose(CacheItem);
+      end;
+    end;
+
+    // Clear Arrays
+    SetLength(FFieldCache, 0);
+    SetLength(FFieldNames, 0);
+  except
+    //
+  end;
+end;
+
+function TMySQLConnection.GetCacheIndex(const FieldName: string): Integer;
+var
+  i         : Integer;
+  CacheItem : PCacheItem;
+
+begin
+  Result := DEF_NO_CONN;
+
+  // Field Names Cached To Speed Up
+  for i := Low(FFieldCache) to High(FFieldCache) do
+  begin
+    CacheItem := FFieldCache[i];
+    // Check Valid
+    if Assigned(CacheItem) then
+    begin
+      // Hope Compare Is Fast Enought
+      if AnsiSameText(FieldName, CacheItem^.CacheName) then
+      begin
+        // Return Cached Index
+        Result := CacheItem^.CacheIdx;
+        // Leave Loop Field Found
+        Break;
       end;
     end;
   end;
@@ -755,7 +854,7 @@ begin
         else
           OutputLen := mysql_escape_string(OutputBuf, PChar(InputStr), InputLen);
 
-        if Assigned(OutputBuf) and (OutputLen > 0) then
+        if (Assigned(OutputBuf) = True) and (OutputLen > 0) then
         begin
           // May Occur Fragmentation
           SetLength(OutputVal, OutputLen);
@@ -834,7 +933,7 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_fetch_row, FUN_MYSQL_FETCH_ROW) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_lengths, FUN_MYSQL_FETCH_LENGTHS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_num_fields, FUN_MYSQL_NUM_FIELDS) = False) then Exit;
-    if (LoadFunc(MySQLHandle, @mysql_fetch_field_direct, FUN_MYSQL_FETCH_FIELD_DIRECT) = False) then Exit;
+    if (LoadFunc(MySQLHandle, @mysql_fetch_fields, FUN_MYSQL_FETCH_FIELDS) = False) then Exit;
 
     IsMySQLOk := True;
   except
@@ -866,7 +965,7 @@ begin
   mysql_fetch_row := nil;
   mysql_fetch_lengths := nil;
   mysql_num_fields := nil;
-  mysql_fetch_field_direct := nil;
+  mysql_fetch_fields := nil;
 
   ReleaseLib(MySQLHandle);
 end;
