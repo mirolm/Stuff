@@ -59,33 +59,33 @@ type
 // -------------------------------------------------------------------------- //
 
 const
-  LIB_MYSQL                    = 'libmysql.dll';
+  LIB_MYSQL               = 'libmysql.dll';
 
-  FUN_MYSQL_ERR_NO             = 'mysql_errno';
-  FUN_MYSQL_ERROR              = 'mysql_error';
-  FUN_MYSQL_SQL_STATE          = 'mysql_sqlstate';
-  FUN_MYSQL_INIT               = 'mysql_init';
-  FUN_MYSQL_OPTIONS            = 'mysql_options';
-  FUN_MYSQL_REAL_CONNECT       = 'mysql_real_connect';
-  FUN_MYSQL_CLOSE              = 'mysql_close';
-  FUN_MYSQL_PING               = 'mysql_ping';
-  FUN_MYSQL_REAL_QUERY         = 'mysql_real_query';
-  FUN_MYSQL_AFFECTED_ROWS      = 'mysql_affected_rows';
-  FUN_MYSQL_NUM_ROWS           = 'mysql_num_rows';
-  FUN_MYSQL_INSERT_ID          = 'mysql_insert_id';
-  FUN_MYSQL_ESCAPE_STRING      = 'mysql_escape_string';
-  FUN_MYSQL_HEX_STRING         = 'mysql_hex_string';
-  FUN_MYSQL_STORE_RESULT       = 'mysql_store_result';
-  FUN_MYSQL_FREE_RESULT        = 'mysql_free_result';
-  FUN_MYSQL_FETCH_ROW          = 'mysql_fetch_row';
-  FUN_MYSQL_DATA_SEEK          = 'mysql_data_seek';
-  FUN_MYSQL_FETCH_LENGTHS      = 'mysql_fetch_lengths';
-  FUN_MYSQL_NUM_FIELDS         = 'mysql_num_fields';
-  FUN_MYSQL_FETCH_FIELDS       = 'mysql_fetch_fields';
+  FUN_MYSQL_ERR_NO        = 'mysql_errno';
+  FUN_MYSQL_ERROR         = 'mysql_error';
+  FUN_MYSQL_SQL_STATE     = 'mysql_sqlstate';
+  FUN_MYSQL_INIT          = 'mysql_init';
+  FUN_MYSQL_OPTIONS       = 'mysql_options';
+  FUN_MYSQL_REAL_CONNECT  = 'mysql_real_connect';
+  FUN_MYSQL_CLOSE         = 'mysql_close';
+  FUN_MYSQL_PING          = 'mysql_ping';
+  FUN_MYSQL_REAL_QUERY    = 'mysql_real_query';
+  FUN_MYSQL_AFFECTED_ROWS = 'mysql_affected_rows';
+  FUN_MYSQL_NUM_ROWS      = 'mysql_num_rows';
+  FUN_MYSQL_INSERT_ID     = 'mysql_insert_id';
+  FUN_MYSQL_ESCAPE_STRING = 'mysql_escape_string';
+  FUN_MYSQL_HEX_STRING    = 'mysql_hex_string';
+  FUN_MYSQL_STORE_RESULT  = 'mysql_store_result';
+  FUN_MYSQL_FREE_RESULT   = 'mysql_free_result';
+  FUN_MYSQL_FETCH_ROW     = 'mysql_fetch_row';
+  FUN_MYSQL_DATA_SEEK     = 'mysql_data_seek';
+  FUN_MYSQL_FETCH_LENGTHS = 'mysql_fetch_lengths';
+  FUN_MYSQL_NUM_FIELDS    = 'mysql_num_fields';
+  FUN_MYSQL_FETCH_FIELDS  = 'mysql_fetch_fields';
 
 const
-  MYSQL_OPT_RECONNECT          = 20; // Attempt Auto Reconnect
-  MYSQL_OPT_COMPRESS           = 1;  // Use Compress Protocol
+  MYSQL_OPT_RECONNECT     = 20; // Attempt Auto Reconnect
+  MYSQL_OPT_COMPRESS      = 1;  // Use Compress Protocol
 
 type
   TMySqlErrNo = function(mysql: PMYSQL): Cardinal; stdcall;
