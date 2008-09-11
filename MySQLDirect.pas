@@ -78,6 +78,7 @@ const
   FUN_MYSQL_STORE_RESULT       = 'mysql_store_result';
   FUN_MYSQL_FREE_RESULT        = 'mysql_free_result';
   FUN_MYSQL_FETCH_ROW          = 'mysql_fetch_row';
+  FUN_MYSQL_DATA_SEEK          = 'mysql_data_seek';
   FUN_MYSQL_FETCH_LENGTHS      = 'mysql_fetch_lengths';
   FUN_MYSQL_NUM_FIELDS         = 'mysql_num_fields';
   FUN_MYSQL_FETCH_FIELDS       = 'mysql_fetch_fields';
@@ -105,6 +106,7 @@ type
   TMySqlStoreResult = function(mysql: PMYSQL): PMYSQL_RES; stdcall;
   TMySqlFreeResult = procedure(result: PMYSQL_RES); stdcall;
   TMySqlFetchRow = function(result: PMYSQL_RES): MYSQL_ROW; stdcall;
+  TMySqlDataSeek = procedure(result: PMYSQL_RES; offset: Int64); stdcall;
   TMySqlFetchLengths = function(result: PMYSQL_RES): PLongWord; stdcall;
   TMySqlNumFields = function(result: PMYSQL_RES): Cardinal; stdcall;
   TMySqlFetchFields = function(result: PMYSQL_RES): PMYSQL_FIELD; stdcall;
@@ -234,6 +236,7 @@ var
   mysql_store_result: TMySqlStoreResult = nil;
   mysql_free_result: TMySqlFreeResult = nil;
   mysql_fetch_row: TMySqlFetchRow = nil;
+  mysql_data_seek: TMySqlDataSeek = nil;
   mysql_fetch_lengths: TMySqlFetchLengths = nil;
   mysql_num_fields: TMySqlNumFields = nil;
   mysql_fetch_fields: TMySqlFetchFields = nil;
@@ -565,7 +568,15 @@ end;
 
 function TMySQLConnection.First: Boolean;
 begin
-  Result := Next();
+  Result := False;
+
+  if Assigned(FQueryResult) then
+  begin
+    // Position To First Row
+    mysql_data_seek(FQueryResult, 0);
+    // Fetch Doggy Fetch...
+    Result := Next();
+  end;
 end;
 
 function TMySQLConnection.Eof: Boolean;
@@ -620,6 +631,7 @@ begin
           // Transfer Names To Array
           // May Occur Fragmentation
           SetLength(FFieldNames[i], Fields^.name_length);
+          // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
           Move(Pointer(Fields^.name)^, Pointer(FFieldNames[i])^, Fields^.name_length);
         end;
 
@@ -693,6 +705,7 @@ begin
       begin
         // May Occur Fragmentation
         SetLength(Result, ResultLen);
+        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
         Move(Pointer(ResultPtr)^, Pointer(Result)^, ResultLen);
       end;
     end;
@@ -845,6 +858,7 @@ begin
         begin
           // May Occur Fragmentation
           SetLength(OutputVal, OutputLen);
+          // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
           Move(Pointer(OutputBuf)^, Pointer(OutputVal)^, OutputLen);
 
           // Return Correct Value
@@ -915,6 +929,7 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_store_result, FUN_MYSQL_STORE_RESULT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_free_result, FUN_MYSQL_FREE_RESULT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_row, FUN_MYSQL_FETCH_ROW) = False) then Exit;
+    if (LoadFunc(MySQLHandle, @mysql_data_seek, FUN_MYSQL_DATA_SEEK) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_lengths, FUN_MYSQL_FETCH_LENGTHS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_num_fields, FUN_MYSQL_NUM_FIELDS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_fetch_fields, FUN_MYSQL_FETCH_FIELDS) = False) then Exit;
@@ -946,6 +961,7 @@ begin
   mysql_store_result := nil;
   mysql_free_result := nil;
   mysql_fetch_row := nil;
+  mysql_data_seek := nil;
   mysql_fetch_lengths := nil;
   mysql_num_fields := nil;
   mysql_fetch_fields := nil;
