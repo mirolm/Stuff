@@ -67,7 +67,6 @@ const
   FUN_MYSQL_INIT               = 'mysql_init';
   FUN_MYSQL_OPTIONS            = 'mysql_options';
   FUN_MYSQL_REAL_CONNECT       = 'mysql_real_connect';
-  FUN_MYSQL_SELECT_DB          = 'mysql_select_db';
   FUN_MYSQL_CLOSE              = 'mysql_close';
   FUN_MYSQL_PING               = 'mysql_ping';
   FUN_MYSQL_REAL_QUERY         = 'mysql_real_query';
@@ -95,7 +94,6 @@ type
   TMySqlOptions = function(mysql: PMYSQL; option: Cardinal; arg: PChar): Integer; stdcall;
   TMySqlRealConnect = function(mysql: PMYSQL; host, user, passwd, db: PChar;
     port: Cardinal; unix_socket: PChar; client_flag: LongWord): PMYSQL; stdcall;
-  TMySqlSelectDb = function(mysql: PMYSQL; db: PChar): Integer; stdcall;
   TMySqlClose = procedure(mysql: PMYSQL); stdcall;
   TMySqlPing = function(mysql: PMYSQL): Integer; stdcall;
   TMySqlRealQuery = function(mysql: PMYSQL; stmt_str: PChar; length: LongWord): Integer; stdcall;
@@ -209,7 +207,7 @@ procedure FreeLib;
 
 function LoadLib(var LibHandle: THandle; const LibName: string): Boolean;
 function LoadFunc(LibHandle: THandle; var FuncPtr: FARPROC; const FuncName: string): Boolean;
-function ReleaseLib(var LibHandle: THandle): Boolean;
+procedure ReleaseLib(var LibHandle: THandle);
 
 var
   // Is MySQL Init Properly
@@ -225,7 +223,6 @@ var
   mysql_init: TMySqlInit = nil;
   mysql_options: TMySqlOptions = nil;
   mysql_real_connect: TMySqlRealConnect = nil;
-  mysql_select_db: TMySqlSelectDb = nil;
   mysql_close: TMySqlClose = nil;
   mysql_ping: TMySqlPing = nil;
   mysql_real_query: TMySqlRealQuery = nil;
@@ -294,6 +291,7 @@ procedure TMySQLConnection.OpenConnection;
 var
   MyErrorMsg : string;
   MyBool     : Byte;
+  ConnCheck  : PMYSQL;
 
 begin
   // MySQLLib Not Init Properly...
@@ -309,7 +307,7 @@ begin
   if Assigned(FConnection) then
   begin
     // Check Connection Still Open
-    // ReUse If Already Open
+    // Reuse If Already Open
     if (Connected() = False) then
     begin
       // Get Error Before Connection Close
@@ -345,31 +343,20 @@ begin
       {$ENDIF}
 
       // Connect To MySQL Server
-      FConnection := mysql_real_connect(FConnection, PChar(FServerHost),
-        PChar(FUserName), PChar(FPassword), nil, FServerPort, nil, 0);
-      if Assigned(FConnection) then
+      ConnCheck := mysql_real_connect(FConnection, PChar(FServerHost),
+        PChar(FUserName), PChar(FPassword), PChar(FDBSchema), FServerPort, nil, 0);
+      // Do Not NIL FConnection On Fail
+      // Must Free Connection Pointer
+      if (Assigned(ConnCheck) = False) then
       begin
-        // Select Default Schema
-        // If User Have No Access Error Returned
-        if (mysql_select_db(FConnection, PChar(FDBSchema)) <> DEF_NO_ERR) then
-        begin
-          // Get Error Before Connection Close
-          MyErrorMsg := GetError();
+        // Get Error Before Connection Close
+        MyErrorMsg := GetError();
 
-          // Free Resources
-          CloseConnection();
-
-          // Throw Exception
-          raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_SELECT_DB, MyErrorMsg]);
-        end;
-      end
-      else
-      begin
         // Just To Be Sure
         CloseConnection();
 
         // Throw Exception
-        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, DEF_FAIL]);
+        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, MyErrorMsg]);
       end;
     end
     else
@@ -896,13 +883,11 @@ begin
   end;
 end;
 
-function ReleaseLib(var LibHandle: THandle): Boolean;
+procedure ReleaseLib(var LibHandle: THandle);
 begin
-  Result := False;
-
   if (LibHandle <> 0) then
   begin
-    Result := FreeLibrary(LibHandle);
+    FreeLibrary(LibHandle);
     LibHandle := 0;
   end;
 end;
@@ -919,7 +904,6 @@ begin
     if (LoadFunc(MySQLHandle, @mysql_init, FUN_MYSQL_INIT) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_options, FUN_MYSQL_OPTIONS) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_real_connect, FUN_MYSQL_REAL_CONNECT) = False) then Exit;
-    if (LoadFunc(MySQLHandle, @mysql_select_db, FUN_MYSQL_SELECT_DB) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_close, FUN_MYSQL_CLOSE) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_ping, FUN_MYSQL_PING) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_real_query, FUN_MYSQL_REAL_QUERY) = False) then Exit;
@@ -951,7 +935,6 @@ begin
   mysql_init := nil;
   mysql_options := nil;
   mysql_real_connect := nil;
-  mysql_select_db := nil;
   mysql_close := nil;
   mysql_ping := nil;
   mysql_real_query := nil;
