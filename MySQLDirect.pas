@@ -143,7 +143,7 @@ type
   end;
 
 type
-  TMySQLConnection = class
+  TMySQLConnection = class(TObject)
   private
     // Connection
     FServerHost: string;
@@ -180,7 +180,7 @@ type
     property Tag: Integer read FTag write FTag;
 
     // Connection Manage
-    procedure OpenConnection;
+    procedure OpenConnection(OptCompress: Boolean = False);
     procedure CloseConnection;
     function Connected: Boolean;
     function Spawn: TMySQLConnection;
@@ -284,13 +284,13 @@ destructor TMySQLConnection.Destroy;
 begin
   // Close Connection If Open
   // Close Query Too
-  CloseConnection();
+  CloseConnection;
 
   inherited Destroy;
 end;
 
 // Connection Manage
-procedure TMySQLConnection.OpenConnection;
+procedure TMySQLConnection.OpenConnection(OptCompress: Boolean = False);
 var
   MyErrorMsg : string;
   MyBool     : Byte;
@@ -301,7 +301,7 @@ begin
   if (IsMySQLOk = False) then
   begin
     // Just To Be Sure
-    CloseConnection();
+    CloseConnection;
 
     // Throw Exception
     raise Exception.CreateFmt(ERR_FORMAT_S, [ERR_INIT, LIB_MYSQL]);
@@ -311,13 +311,13 @@ begin
   begin
     // Check Connection Still Open
     // Reuse If Already Open
-    if (Connected() = False) then
+    if (Connected = False) then
     begin
       // Get Error Before Connection Close
-      MyErrorMsg := GetError();
+      MyErrorMsg := GetError;
 
       // Connection Is Dead
-      CloseConnection();
+      CloseConnection;
 
       // Throw Exception
       raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_PING, MyErrorMsg]);
@@ -326,7 +326,7 @@ begin
   else
   begin
     // Just To Be Sure
-    CloseConnection();
+    CloseConnection;
 
     // No Connection
     FConnection := mysql_init(nil);
@@ -339,11 +339,13 @@ begin
       // No Need To Check Result. Older Versions Off By Default
       mysql_options(FConnection, MYSQL_OPT_RECONNECT, @MyBool);
 
-      {$IFDEF USE_COMPRESS}
+      // OFF By Default
+      if OptCompress then
+      begin
         // Use Compress Protocol. Good For Big Remote Resultset
         // Param Ignored For This Option
         mysql_options(FConnection, MYSQL_OPT_COMPRESS, @MyBool);
-      {$ENDIF}
+      end;
 
       // Connect To MySQL Server
       ConnCheck := mysql_real_connect(FConnection, PChar(FServerHost),
@@ -353,10 +355,10 @@ begin
       if (Assigned(ConnCheck) = False) then
       begin
         // Get Error Before Connection Close
-        MyErrorMsg := GetError();
+        MyErrorMsg := GetError;
 
         // Just To Be Sure
-        CloseConnection();
+        CloseConnection;
 
         // Throw Exception
         raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_CONNECT, MyErrorMsg]);
@@ -365,7 +367,7 @@ begin
     else
     begin
       // Just To Be Sure
-      CloseConnection();
+      CloseConnection;
 
       // Throw Exception
       raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_INIT, DEF_FAIL]);
@@ -378,16 +380,16 @@ begin
   try
     // Close Open Queries
     // Free Client Resources
-    CloseQuery();
+    CloseQuery;
 
-    if Assigned(FConnection) then
-    begin
-      try
+    try
+      if Assigned(FConnection) then
+      begin
         // Close Connection To Server
         mysql_close(FConnection);
-      except
-        // Bad Connection
       end;
+    except
+      // Bad Connection
     end;
   finally
     FConnection := nil;
@@ -401,10 +403,7 @@ begin
   if Assigned(FConnection) then
   begin
     // Check Connection Still Open
-    if (mysql_ping(FConnection) = DEF_NO_ERR) then
-    begin
-      Result := True;
-    end;
+    Result := (mysql_ping(FConnection) = DEF_NO_ERR);
   end;
 end;
 
@@ -420,22 +419,22 @@ begin
   if Assigned(FConnection) then
   begin
     // Close Query If Open
-    CloseQuery();
+    CloseQuery;
 
     // Execute Statement
     if (mysql_real_query(FConnection, PChar(SQLCommand), Length(SQLCommand)) <> DEF_NO_ERR) then
     begin
       // Just To Be Sure
-      CloseQuery();
+      CloseQuery;
 
       // Throw Exception
-      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_QUERY, GetError()]);
+      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_REAL_QUERY, GetError]);
     end;
   end
   else
   begin
     // Just To Be Sure
-    CloseQuery();
+    CloseQuery;
 
     // Throw Exception
     raise Exception.CreateFmt(ERR_FORMAT_S, [ERR_CONN, DEF_FAIL]);
@@ -497,30 +496,30 @@ begin
       if (mysql_errno(FConnection) = DEF_NO_ERR) then
       begin
         // Cache Query Filed Names
-        GetFieldNames();
+        GetFieldNames;
       end
       else
       begin
         // Just To Be Sure
-        CloseQuery();
+        CloseQuery;
 
         // Throw Exception
-        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_STORE_RESULT, GetError()]);
+        raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_STORE_RESULT, GetError]);
       end;
     end
     else
     begin
       // Just To Be Sure
-      CloseQuery();
+      CloseQuery;
 
       // Throw Exception
-      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_STORE_RESULT, GetError()]);
+      raise Exception.CreateFmt(ERR_FORMAT_S, [FUN_MYSQL_STORE_RESULT, GetError]);
     end;
   end
   else
   begin
     // Just To Be Sure
-    CloseQuery();
+    CloseQuery;
 
     // Throw Exception
     raise Exception.CreateFmt(ERR_FORMAT_S, [ERR_CONN, DEF_FAIL]);
@@ -530,14 +529,14 @@ end;
 procedure TMySQLConnection.CloseQuery;
 begin
   try
-    if Assigned(FQueryResult) then
-    begin
-      try
+    try
+      if Assigned(FQueryResult) then
+      begin
         // Free Fetched Rows
         mysql_free_result(FQueryResult);
-      except
-        // Bad Query
       end;
+    except
+      // Bad Query
     end;
   finally
     FQueryResult := nil;
@@ -559,10 +558,7 @@ begin
     // Get Record Data Values Lenghts
     FResultLenghts := mysql_fetch_lengths(FQueryResult);
     // Check Valid
-    if Assigned(FResultRow) and Assigned(FResultLenghts) then
-    begin
-      Result := True;
-    end;
+    Result := Eof;
   end;
 end;
 
@@ -575,7 +571,7 @@ begin
     // Position To First Row
     mysql_data_seek(FQueryResult, 0);
     // Fetch Doggy Fetch...
-    Result := Next();
+    Result := Next;
   end;
 end;
 
@@ -683,7 +679,8 @@ var
 begin
   Result := DEF_NO_STR;
 
-  if Assigned(FResultRow) and Assigned(FResultLenghts) then
+  // Check Row Retrieved
+  if (Eof = False) then
   begin
     FieldIndex := GetFieldIndex(FieldName);
     if (FieldIndex <> DEF_NO_CONN) then
@@ -971,10 +968,10 @@ end;
 
 initialization
   // Get Library Init Status
-  InitLib();
+  InitLib;
 
 finalization
   // Detach From Library
-  FreeLib();
+  FreeLib;
 
 end.
