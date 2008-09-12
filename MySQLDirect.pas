@@ -558,7 +558,7 @@ begin
     // Get Record Data Values Lenghts
     FResultLenghts := mysql_fetch_lengths(FQueryResult);
     // Check Valid
-    Result := Eof;
+    Result := (Eof = False);
   end;
 end;
 
