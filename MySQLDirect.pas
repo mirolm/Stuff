@@ -622,7 +622,7 @@ begin
 
         // Many Select Queries May Lead
         // To Memory Fragmentation
-        if Assigned(Fields^.name) and (Fields^.name_length > 0) then
+        if (Assigned(Fields^.name) = True) and (Fields^.name_length > 0) then
         begin
           // Transfer Names To Array
           // May Occur Fragmentation
@@ -801,14 +801,14 @@ begin
 
     // Just To Be Sure
     PErrorString := mysql_error(FConnection);
-    if Assigned(PErrorString) then
+    if (Assigned(PErrorString) = True) and (StrLen(PErrorString) > 0) then
       ErrorString := PErrorString
     else
       ErrorString := DEF_ERROR;
 
     // Just To Be Sure
     PErrorState := mysql_sqlstate(FConnection);
-    if Assigned(PErrorState) then
+    if (Assigned(PErrorState) = True) and (StrLen(PErrorString) > 0) then
       ErrorState := PErrorState
     else
       ErrorState := DEF_STATE;
