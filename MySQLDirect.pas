@@ -202,6 +202,7 @@ type
 
 // Other Routines
 function MySqlEscapeString(const InputStr: string; ToHex: Boolean = False): string;
+function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string; const ResultDef: string): Boolean;
 
 // Loader Routines
 procedure InitLib;
@@ -617,21 +618,11 @@ begin
       // Cycle All Items
       for i := Low(FFieldNames) to High(FFieldNames) do
       begin
-        // Set By Default
-        FFieldNames[i] := DEF_NO_STR;
+        // Transfer Names To Array May Occur Fragmentation
+        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
+        MyCopyString(Fields^.name, Fields^.name_length, FFieldNames[i], DEF_NO_STR);
 
-        // Many Select Queries May Lead
-        // To Memory Fragmentation
-        if (Assigned(Fields^.name) = True) and (Fields^.name_length > 0) then
-        begin
-          // Transfer Names To Array
-          // May Occur Fragmentation
-          SetLength(FFieldNames[i], Fields^.name_length);
-          // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-          Move(Pointer(Fields^.name)^, Pointer(FFieldNames[i])^, Fields^.name_length);
-        end;
-
-        // Move To Next Field Record
+        // GoTo To Next Field Record
         Inc(Fields);
       end;
     end;
@@ -697,14 +688,9 @@ begin
       ResultPtr := PDataRow^;
       ResultLen := PDataLen^;
 
-      // Copy Field Value
-      if (Assigned(ResultPtr) = True) and (ResultLen > 0) then
-      begin
-        // May Occur Fragmentation
-        SetLength(Result, ResultLen);
-        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-        Move(Pointer(ResultPtr)^, Pointer(Result)^, ResultLen);
-      end;
+      // Copy Field Value May Occur Fragmentation
+      // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
+      MyCopyString(ResultPtr, ResultLen, Result, DEF_NO_STR);
     end;
   end;
 end;
@@ -797,21 +783,18 @@ begin
   // Return Formatted Error Message
   if Assigned(FConnection) then
   begin
+    // Retrieve Error Number
     ErrorNumber := mysql_errno(FConnection);
 
-    // Just To Be Sure
+    // Retrieve MYSQL Error
     PErrorString := mysql_error(FConnection);
-    if (Assigned(PErrorString) = True) and (StrLen(PErrorString) > 0) then
-      ErrorString := PErrorString
-    else
-      ErrorString := DEF_ERROR;
+    // Copy Error Data
+    MyCopyString(PErrorString, StrLen(PErrorString), ErrorString, DEF_ERROR);
 
-    // Just To Be Sure
+    // Retrieve SQL State
     PErrorState := mysql_sqlstate(FConnection);
-    if (Assigned(PErrorState) = True) and (StrLen(PErrorString) > 0) then
-      ErrorState := PErrorState
-    else
-      ErrorState := DEF_STATE;
+    // Copy Error Data
+    MyCopyString(PErrorState, StrLen(PErrorState), ErrorState, DEF_STATE);
   end
   else
   begin
@@ -851,13 +834,10 @@ begin
         else
           OutputLen := mysql_escape_string(OutputBuf, PChar(InputStr), InputLen);
 
-        if (Assigned(OutputBuf) = True) and (OutputLen > 0) then
+        // May Occur Fragmentation
+        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
+        if MyCopyString(OutputBuf, OutputLen, OutputVal, DEF_NO_STR) then
         begin
-          // May Occur Fragmentation
-          SetLength(OutputVal, OutputLen);
-          // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-          Move(Pointer(OutputBuf)^, Pointer(OutputVal)^, OutputLen);
-
           // Return Correct Value
           // To Be Decoded Format 0xHEX_STRING. No Quotes.
           if ToHex then
@@ -869,6 +849,30 @@ begin
         FreeMem(OutputBuf);
       end;
     end;
+  end;
+end;
+
+function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string; const ResultDef: string): Boolean;
+begin
+  try
+    // Reset Values
+    Result := False;
+    ResultStr := ResultDef;
+
+    // Check Input Data
+    if (Assigned(DataPtr) = True) and (DataLen > 0) then
+    begin
+      // Resize String
+      SetLength(ResultStr, DataLen);
+      // Copy Data To String
+      Move(DataPtr^, Pointer(ResultStr)^, DataLen);
+      // Set Success
+      Result := True;
+    end;
+  except
+    // Reset Values
+    Result := False;
+    ResultStr := ResultDef;
   end;
 end;
 
