@@ -182,7 +182,7 @@ type
   end;
 
 type
-  TSockClient = class
+  TSockClient = class(TObject)
   private
     FSocket     : TSocket;
     FDocument   : TBufferRec;
