@@ -202,7 +202,8 @@ type
 
 // Other Routines
 function MySqlEscapeString(const InputStr: string; ToHex: Boolean = False): string;
-function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string; const ResultDef: string): Boolean;
+function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string;
+  const ResultDef: string = DEF_NO_STR): Boolean;
 
 // Loader Routines
 procedure InitLib;
@@ -389,23 +390,21 @@ begin
         // Close Connection To Server
         mysql_close(FConnection);
       end;
-    except
-      // Bad Connection
+    finally
+      FConnection := nil;
     end;
-  finally
-    FConnection := nil;
+  except
+    // Bad Connection
   end;
 end;
 
 function TMySQLConnection.Connected: Boolean;
 begin
-  Result := False;
-
+  // Check Connection Still Open
   if Assigned(FConnection) then
-  begin
-    // Check Connection Still Open
-    Result := (mysql_ping(FConnection) = DEF_NO_ERR);
-  end;
+    Result := (mysql_ping(FConnection) = DEF_NO_ERR)
+  else
+    Result := False;
 end;
 
 function TMySQLConnection.Spawn: TMySQLConnection;
@@ -536,15 +535,15 @@ begin
         // Free Fetched Rows
         mysql_free_result(FQueryResult);
       end;
-    except
-      // Bad Query
+    finally
+      FQueryResult := nil;
+      FResultRow := nil;
+      FResultLenghts := nil;
+      // Clear Field Cache
+      ClearFieldCache;
     end;
-  finally
-    FQueryResult := nil;
-    FResultRow := nil;
-    FResultLenghts := nil;
-    // Clear Field Cache
-    ClearFieldCache;
+  except
+    // Bad Query
   end;
 end;
 
@@ -571,13 +570,14 @@ begin
   begin
     // Position To First Row
     mysql_data_seek(FQueryResult, 0);
-    // Fetch Doggy Fetch...
+    // Fetch Result Row
     Result := Next;
   end;
 end;
 
 function TMySQLConnection.Eof: Boolean;
 begin
+  // Routine mysql_eof Deprecated
   if Assigned(FResultRow) and Assigned(FResultLenghts) then
     Result := False
   else
@@ -618,9 +618,8 @@ begin
       // Cycle All Items
       for i := Low(FFieldNames) to High(FFieldNames) do
       begin
-        // Transfer Names To Array May Occur Fragmentation
-        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-        MyCopyString(Fields^.name, Fields^.name_length, FFieldNames[i], DEF_NO_STR);
+        // Transfer Names To Array
+        MyCopyString(Fields^.name, Fields^.name_length, FFieldNames[i]);
 
         // GoTo To Next Field Record
         Inc(Fields);
@@ -643,6 +642,7 @@ begin
     // Field Names Cached To Speed Up
     for i := Low(FFieldNames) to High(FFieldNames) do
     begin
+      // Cycle Fields Array
       FieldDest := FFieldNames[i];
 
       // Hope Compare Is Fast Enought
@@ -662,10 +662,8 @@ end;
 function TMySQLConnection.GetFieldValue(const FieldName: string): string;
 var
   FieldIndex : Integer;
-  PDataRow   : MYSQL_ROW;
-  ResultPtr  : PChar;
-  PDataLen   : PLongWord;
-  ResultLen  : LongWord;
+  DataRow    : MYSQL_ROW;
+  DataLen    : PLongWord;
 
 begin
   Result := DEF_NO_STR;
@@ -673,24 +671,19 @@ begin
   // Check Row Retrieved
   if (Eof = False) then
   begin
+    // Keep Original Pointers Unmodified
+    DataRow := FResultRow;
+    DataLen := FResultLenghts;
+
     FieldIndex := GetFieldIndex(FieldName);
     if (FieldIndex <> DEF_NO_CONN) then
     begin
-      // Keep Original Pointers UnModified
-      PDataRow := FResultRow;
-      PDataLen := FResultLenghts;
-
       // Goto Needed Field
-      Inc(PDataRow, FieldIndex);
-      Inc(PDataLen, FieldIndex);
+      Inc(DataRow, FieldIndex);
+      Inc(DataLen, FieldIndex);
 
-      // Retrieve Value And Length
-      ResultPtr := PDataRow^;
-      ResultLen := PDataLen^;
-
-      // Copy Field Value May Occur Fragmentation
-      // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-      MyCopyString(ResultPtr, ResultLen, Result, DEF_NO_STR);
+      // Copy Field Value
+      MyCopyString(DataRow^, DataLen^, Result);
     end;
   end;
 end;
@@ -702,15 +695,17 @@ var
 
 begin
   try
-    // Populate Cache Item
+    // Create Item
     New(CacheItem);
+    // Just To Be Sure
     if Assigned(CacheItem) then
     begin
+      // Populate Cache Item
       CacheItem^.CacheName := FieldName;
       CacheItem^.CacheIdx := FieldIndex;
       // Resize Array
       SetLength(FFieldCache, High(FFieldCache) + 2);
-      // Add Item
+      // Attach Item
       FFieldCache[High(FFieldCache)] := CacheItem;
     end;
   except
@@ -780,6 +775,11 @@ var
   ErrorString  : string;
 
 begin
+  // Set Default Values
+  ErrorString := DEF_ERROR;
+  ErrorNumber := DEF_NO_ERR;
+  ErrorState  := DEF_STATE;
+
   // Return Formatted Error Message
   if Assigned(FConnection) then
   begin
@@ -795,12 +795,6 @@ begin
     PErrorState := mysql_sqlstate(FConnection);
     // Copy Error Data
     MyCopyString(PErrorState, StrLen(PErrorState), ErrorState, DEF_STATE);
-  end
-  else
-  begin
-    ErrorString := DEF_ERROR;
-    ErrorNumber := DEF_NO_ERR;
-    ErrorState  := DEF_STATE;
   end;
 
   // !!! Error Code DbExpress Return IN ErrorState !!!
@@ -825,7 +819,7 @@ begin
     InputLen := Length(InputStr);
     if (InputLen > 0) then
     begin
-      // May Occur Fragmentation
+      // Get Working Buffer
       OutputBuf := AllocMem((InputLen + 1) * 2);
       try
         // Convert Data According To Flag
@@ -834,25 +828,26 @@ begin
         else
           OutputLen := mysql_escape_string(OutputBuf, PChar(InputStr), InputLen);
 
-        // May Occur Fragmentation
-        // Sometimes Length Is Bigger And Buffer May Contain Junk At The End
-        if MyCopyString(OutputBuf, OutputLen, OutputVal, DEF_NO_STR) then
+        // Copy Buffer To String
+        if MyCopyString(OutputBuf, OutputLen, OutputVal) then
         begin
           // Return Correct Value
-          // To Be Decoded Format 0xHEX_STRING. No Quotes.
+          // To Be Decoded Format 0xHEX_STRING
           if ToHex then
             Result := Format(HEX_FORMAT, [OutputVal])
           else
             Result := OutputVal;
         end;
       finally
+        // Free Buffer
         FreeMem(OutputBuf);
       end;
     end;
   end;
 end;
 
-function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string; const ResultDef: string): Boolean;
+function MyCopyString(DataPtr: Pointer; DataLen: Cardinal; var ResultStr: string;
+  const ResultDef: string = DEF_NO_STR): Boolean;
 begin
   try
     // Reset Values
@@ -909,9 +904,9 @@ end;
 
 procedure InitLib;
 begin
-  IsMySQLOk := False;
-
   try
+    IsMySQLOk := False;
+
     if (LoadLib(MySQLHandle, LIB_MYSQL) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_errno, FUN_MYSQL_ERR_NO) = False) then Exit;
     if (LoadFunc(MySQLHandle, @mysql_error, FUN_MYSQL_ERROR) = False) then Exit;
