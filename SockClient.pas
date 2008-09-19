@@ -73,7 +73,6 @@ type
 const
   AF_INET           = 2;
   SOCK_STREAM       = 1;
-  IPPROTO_TCP       = 6;
   FIONBIO           = $8004667E;
 
   SOCKET_ERROR      = -1;
@@ -387,7 +386,7 @@ begin
     if (FTimerHwnd = 0) then Exit;
 
     // Get Socket
-    FSocket := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    FSocket := socket(AF_INET, SOCK_STREAM, 0);
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
