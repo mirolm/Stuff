@@ -74,7 +74,6 @@ const
   AF_INET           = 2;
   SOCK_STREAM       = 1;
   IPPROTO_TCP       = 6;
-  FIONREAD          = $4004667F;
   FIONBIO           = $8004667E;
 
   SOCKET_ERROR      = -1;
@@ -91,6 +90,9 @@ const
   SD_SEND           = $01;
 
   SOL_SOCKET        = $FFFF;
+
+  SO_SNDTIMEO       = $1005;
+  SO_RCVTIMEO       = $1006;
   SO_ERROR          = $1007;
 
 // -------------------------------------------------------------------------- //
@@ -104,6 +106,8 @@ type
   TWSASetLastError = procedure(iError: Integer); stdcall;
   TGetSockOpt = function(s: TSocket; level, optname: Integer; optval: PChar;
     var optlen: Integer): Integer; stdcall;
+  TSetSockOpt = function(s: TSocket; level, optname: Integer; optval: PChar;
+    optlen: Integer): Integer; stdcall;
   TTSocket = function(af, _type, protocol: Integer): TSocket; stdcall;
   TIoctlSocket = function(s: TSocket; cmd: DWORD; var argp: Integer): Integer; stdcall;
   TConnect = function(s: TSocket; name: PSockAddr; namelen: Integer): Integer; stdcall;
@@ -127,6 +131,7 @@ const
   FUN_WSA_GET_LAST_ERROR = 'WSAGetLastError';
   FUN_WSA_SET_LAST_ERROR = 'WSASetLastError';
   FUN_GET_SOCK_OPT       = 'getsockopt';
+  FUN_SET_SOCK_OPT       = 'setsockopt';
   FUN_SOCKET             = 'socket';
   FUN_IO_CTL_SOCKET      = 'ioctlsocket';
   FUN_CONNECT            = 'connect';
@@ -147,7 +152,7 @@ const
 
 const
   INET_BUFF_LEN = 1024;      // Buffer Resize Step
-  SOCK_MAX_CHUN = 65535;     // Max Packet Size
+  SOCK_MAX_CHUN = 32768;     // Max Buffer Size
   TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
   SOCK_NO_ERROR = 0;         // WinSock Success
 
@@ -264,6 +269,7 @@ var
   WSAGetLastError: TWSAGetLastError = nil;
   WSASetLastError: TWSASetLastError = nil;
   getsockopt: TGetSockOpt = nil;
+  setsockopt: TSetSockOpt = nil;
   socket: TTSocket = nil;
   ioctlsocket: TIoctlSocket = nil;
   connect: TConnect = nil;
@@ -390,6 +396,10 @@ begin
 
     // Check Results To Be Sure
     if (ioctlsocket(FSocket, FIONBIO, argp) <> SOCK_NO_ERROR) then Exit;
+
+    // Set Socket Timeouts Do Not Rely On Default Values
+    if (setsockopt(FSocket, SOL_SOCKET, SO_SNDTIMEO, @FTimeout, SizeOf(FTimeout)) <> SOCK_NO_ERROR) then Exit;
+    if (setsockopt(FSocket, SOL_SOCKET, SO_RCVTIMEO, @FTimeout, SizeOf(FTimeout)) <> SOCK_NO_ERROR) then Exit;
 
     // Create Async Event
     EventHwnd := WSACreateEvent;
@@ -628,31 +638,19 @@ begin
         if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
         begin
           // Reset To Be Sure
-          BytesRead := SOCKET_ERROR;
-          // Reset To Be Sure
-          BuffLen := 0;
+          BuffLen := SOCK_MAX_CHUN;
 
-          // Stream Bigger Chunks
-          if (ioctlsocket(FSocket, FIONREAD, BuffLen) = SOCK_NO_ERROR) then
+          // Write Position Mainly For ShutDown Case
+          // Reset Only On Receive. ShutDown Appends Buffer
+          WritePoint := FDocument.Actual + BytesTotal;
+          // Resize Buffer If Needed
+          ResizeBuffer(FDocument, WritePoint + BuffLen);
+
+          BytesRead := recv(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(WritePoint))^, BuffLen, 0);
+          // Caclulate Total Bytes Received
+          if (BytesRead > 0) then
           begin
-            // Check Recv Read Len
-            if (BuffLen > SOCK_MAX_CHUN) then
-            begin
-              BuffLen := SOCK_MAX_CHUN;
-            end;
-
-            // Write Position Mainly For ShutDown Case
-            // Reset Only On Receive. ShutDown Appends Buffer
-            WritePoint := FDocument.Actual + BytesTotal;
-            // Resize Buffer If Needed
-            ResizeBuffer(FDocument, WritePoint + BuffLen);
-
-            BytesRead := recv(FSocket, Pointer(DWORD(FDocument.Buffer) + DWORD(WritePoint))^, BuffLen, 0);
-            // Caclulate Total Bytes Received
-            if (BytesRead > 0) then
-            begin
-              Inc(BytesTotal, BytesRead);
-            end;
+            Inc(BytesTotal, BytesRead);
           end;
 
           // Stop When Done
@@ -1057,6 +1055,7 @@ begin
     if (LoadFunc(WSLibHandle, @WSAGetLastError, FUN_WSA_GET_LAST_ERROR) = False) then Exit;
     if (LoadFunc(WSLibHandle, @WSASetLastError, FUN_WSA_SET_LAST_ERROR) = False) then Exit;
     if (LoadFunc(WSLibHandle, @getsockopt, FUN_GET_SOCK_OPT) = False) then Exit;
+    if (LoadFunc(WSLibHandle, @setsockopt, FUN_SET_SOCK_OPT) = False) then Exit;
     if (LoadFunc(WSLibHandle, @socket, FUN_SOCKET) = False) then Exit;
     if (LoadFunc(WSLibHandle, @ioctlsocket, FUN_IO_CTL_SOCKET) = False) then Exit;
     if (LoadFunc(WSLibHandle, @connect, FUN_CONNECT) = False) then Exit;
@@ -1094,6 +1093,7 @@ begin
     WSAGetLastError := nil;
     WSASetLastError := nil;
     getsockopt := nil;
+    setsockopt:= nil;
     socket := nil;
     ioctlsocket := nil;
     connect := nil;
