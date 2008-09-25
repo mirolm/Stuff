@@ -153,7 +153,7 @@ const
   INET_BUFF_LEN = 1024;      // Buffer Resize Step
   SOCK_MAX_CHUN = 32768;     // Max Buffer Size
   TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
-  PROBE_WAIT    = 0;         // Timeout Probe
+  PROBE_WAIT    = 0;         // Event Probe
   SOCK_NO_ERROR = 0;         // WinSock Success
 
   SOCKS_VERSION = $04;       // SOCKS4 Protocol Ident
