@@ -153,6 +153,7 @@ const
   INET_BUFF_LEN = 1024;      // Buffer Resize Step
   SOCK_MAX_CHUN = 32768;     // Max Buffer Size
   TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
+  PROBE_WAIT    = 0;         // Timeout Probe
   SOCK_NO_ERROR = 0;         // WinSock Success
 
   SOCKS_VERSION = $04;       // SOCKS4 Protocol Ident
@@ -196,7 +197,6 @@ type
     FTargetPort : Word;
     FProxyHost  : string;
     FProxyPort  : Word;
-    FResultCode : Integer;
     FProxyCode  : Integer;
     FResolver   : Boolean;
 
@@ -238,7 +238,7 @@ type
     // Request Result
     property Document: string read GetDocument;
     // Socket, Proxy Error Codes
-    property ResultCode: Integer read FResultCode;
+    property ResultCode: Integer read SocketError;
     property ProxyCode: Integer read FProxyCode;
   end;
 
@@ -550,7 +550,7 @@ begin
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
       begin
         // SlowDown Do Not Drain CPU
-        if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
+        if (WaitForSingleObject(EventHwnd, PROBE_WAIT) = WAIT_OBJECT_0) then
         begin
           // Send Max SOCK_MAX_CHUN Len
           BuffLen := FDocument.Actual - BytesTotal;
@@ -634,7 +634,7 @@ begin
       while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
       begin
         // SlowDown Do Not Drain CPU
-        if (WaitForSingleObject(EventHwnd, TROTTLE_WAIT) = WAIT_OBJECT_0) then
+        if (WaitForSingleObject(EventHwnd, PROBE_WAIT) = WAIT_OBJECT_0) then
         begin
           // Reset To Be Sure
           BuffLen := SOCK_MAX_CHUN;
@@ -862,8 +862,6 @@ begin
   except
     Result := SOCKET_ERROR;
   end;
-
-  FResultCode := Result;
 end;
 
 procedure TSockClient.SocketReset;
@@ -875,7 +873,6 @@ begin
   FTimerHwnd := INVALID_HANDLE_VALUE;
 
   // Reset Error Vars
-  FResultCode := SOCK_NO_ERROR;
   FProxyCode := SOCK_NO_ERROR;
 
   // Reset Document Buffer
