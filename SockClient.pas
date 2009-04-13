@@ -191,7 +191,6 @@ type
   private
     FSocket     : TSocket;
     FDocument   : TBufferRec;
-    FTimerHwnd  : THandle;
     FTimeout    : Integer;
     FTargetHost : string;
     FTargetPort : Word;
@@ -201,8 +200,8 @@ type
     FResolver   : Boolean;
 
     // Timeout Control
-    function TimerStart(Timeout: Integer): Boolean;
-    procedure TimerAbort;
+    function TimerStart(var TimerHwnd: THandle; Timeout: Integer): Boolean;
+    procedure TimerAbort(var TimerHwnd: THandle);
     // Socket Connect
     function SocketConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
     function ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
@@ -311,8 +310,6 @@ end;
 
 destructor TSockClient.Destroy;
 begin
-  // Force Request Abort
-  TimerAbort;
   // Destroy Socket
   SocketClose;
 
@@ -322,48 +319,49 @@ begin
   inherited Destroy;
 end;
 
-function TSockClient.TimerStart(Timeout: Integer): Boolean;
+function TSockClient.TimerStart(var TimerHwnd: THandle; Timeout: Integer): Boolean;
 var
   TimerDue: LARGE_INTEGER;
 
 begin
   try
     Result := False;
+    TimerHwnd := INVALID_HANDLE_VALUE;
 
     // Check Timeout Valid
     if (Timeout <= 0) then Exit;
 
-    FTimerHwnd := CreateWaitableTimer(nil, True, nil);
+    TimerHwnd := CreateWaitableTimer(nil, True, nil);
     // Check Timer Created
-    if (FTimerHwnd = 0) then Exit;
+    if (TimerHwnd = 0) then Exit;
 
     // Set Timeout
     TimerDue.QuadPart := -10000000 * (Timeout div 1000);
     // Start Timeout Timer
-    Result := SetWaitableTimer(FTimerHwnd, TLargeInteger(TimerDue), 0, nil, nil, False);
+    Result := SetWaitableTimer(TimerHwnd, TLargeInteger(TimerDue), 0, nil, nil, False);
   except
-    FTimerHwnd := INVALID_HANDLE_VALUE;
+    TimerHwnd := INVALID_HANDLE_VALUE;
     Result := False;
   end;
 end;
 
-procedure TSockClient.TimerAbort;
+procedure TSockClient.TimerAbort(var TimerHwnd: THandle);
 begin
   try
     // Check Handle
-    if (FTimerHwnd = INVALID_HANDLE_VALUE) then Exit;
+    if (TimerHwnd = INVALID_HANDLE_VALUE) then Exit;
 
     try
       // Reset Timer Abort All
-      CancelWaitableTimer(FTimerHwnd);
+      CancelWaitableTimer(TimerHwnd);
     finally
       // Release Timer
-      CloseHandle(FTimerHwnd);
+      CloseHandle(TimerHwnd);
       // Reset Handle
-      FTimerHwnd := INVALID_HANDLE_VALUE;
+      TimerHwnd := INVALID_HANDLE_VALUE;
     end;
   except
-    FTimerHwnd := INVALID_HANDLE_VALUE;
+    TimerHwnd := INVALID_HANDLE_VALUE;
   end;
 end;
 
@@ -374,6 +372,7 @@ var
   SockRes    : Integer;
   EventArray : array[0..1] of THandle;
   EventHwnd  : WSAEVENT;
+  TimerHwnd  : THandle;
 
 begin
   try
@@ -381,9 +380,6 @@ begin
 
     // Check Machine Data
     if (Length(Trim(ConnectHost)) <= 0) or (ConnectPort <= 0) then Exit;
-
-    // Check Timer
-    if (FTimerHwnd = 0) then Exit;
 
     // Get Socket
     FSocket := socket(AF_INET, SOCK_STREAM, 0);
@@ -406,6 +402,8 @@ begin
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
     try
+      // Trigger Timeout Timer
+      if (TimerStart(TimerHwnd, FTimeout) = False) then Exit;
       // Attach Event, Check Attached
       if (WSAEventSelect(FSocket, EventHwnd, FD_CONNECT) <> SOCK_NO_ERROR) then Exit;
 
@@ -420,7 +418,7 @@ begin
       if (SockRes = SOCKET_ERROR) and (SocketError = WSAEWOULDBLOCK) then
       begin
         // Attach Events
-        EventArray[0] := FTimerHwnd;
+        EventArray[0] := TimerHwnd;
         EventArray[1] := EventHwnd;
 
         // Success On Connect Event Fail On Timer Elapse
@@ -436,6 +434,8 @@ begin
       WSAEventSelect(FSocket, EventHwnd, 0);
       // Close Event
       WSACloseEvent(EventHwnd);
+      // Abort Timeout Timer
+      TimerAbort(TimerHwnd);
     end;
   except
     Result := False;
@@ -521,6 +521,7 @@ var
   BytesTotal : Integer;
   EventHwnd  : WSAEVENT;
   BuffLen    : Integer;
+  TimerHwnd  : THandle;
 
 begin
   try
@@ -531,9 +532,6 @@ begin
     // Check Request Length
     if (FDocument.Actual <= 0) then Exit;
 
-    // Check Timer
-    if (FTimerHwnd = 0) then Exit;
-
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
 
@@ -543,11 +541,13 @@ begin
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
     try
+      // Trigger Timeout Timer
+      if (TimerStart(TimerHwnd, FTimeout) = False) then Exit;
       // Attach Event, Check Attached
       if (WSAEventSelect(FSocket, EventHwnd, FD_WRITE) <> SOCK_NO_ERROR) then Exit;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
-      while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
+      while (WaitForSingleObject(TimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
       begin
         // SlowDown Do Not Drain CPU
         if (WaitForSingleObject(EventHwnd, PROBE_WAIT) = WAIT_OBJECT_0) then
@@ -583,6 +583,8 @@ begin
       WSAEventSelect(FSocket, EventHwnd, 0);
       // Close Event
       WSACloseEvent(EventHwnd);
+      // Abort Timeout Timer
+      TimerAbort(TimerHwnd);
     end;
   except
     Result := False;
@@ -596,15 +598,13 @@ var
   BytesRead  : Integer;
   BytesTotal : Integer;
   WritePoint : Integer;
+  TimerHwnd  : THandle;
 
 begin
   try
     Result := False;
     // Total Bytes Recv
     BytesTotal := 0;
-
-    // Check Timer
-    if (FTimerHwnd = 0) then Exit;
 
     // Check Socket
     if (FSocket = INVALID_SOCKET) then Exit;
@@ -615,8 +615,9 @@ begin
     if (EventHwnd = WSA_INVALID_EVENT) then Exit;
 
     try
-      // Attach Event, Check Attached
-      // Check Operation Type
+      // Trigger Timeout Timer
+      if (TimerStart(TimerHwnd, FTimeout) = False) then Exit;
+      // Attach Event, Check Attached, Check Operation Type
       if SockShut then
       begin
         if (WSAEventSelect(FSocket, EventHwnd, FD_CLOSE) <> SOCK_NO_ERROR) then Exit;
@@ -631,7 +632,7 @@ begin
       end;
 
       // SlowDown Do Not Drain CPU. Watch For Abort
-      while (WaitForSingleObject(FTimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
+      while (WaitForSingleObject(TimerHwnd, TROTTLE_WAIT) = WAIT_TIMEOUT) do
       begin
         // SlowDown Do Not Drain CPU
         if (WaitForSingleObject(EventHwnd, PROBE_WAIT) = WAIT_OBJECT_0) then
@@ -672,6 +673,8 @@ begin
       WSAEventSelect(FSocket, EventHwnd, 0);
       // Close Event
       WSACloseEvent(EventHwnd);
+      // Abort Timeout Timer
+      TimerAbort(TimerHwnd);
     end;
   except
     Result := False;
@@ -738,9 +741,6 @@ begin
     // Just To Be Sure
     if (IsWinSockOk = False) then Exit;
 
-    // Trigger Timeout Timer
-    if (TimerStart(FTimeout) = False) then Exit;
-
     // Check SOCKS Proxy Attached
     if (Length(Trim(FProxyHost)) > 0) and (FProxyPort > 0) then
     begin
@@ -785,8 +785,6 @@ begin
   try
     // Disconnect Close Socket
     SocketClose(CloseGraceful);
-    // Abort Timeout Timer
-    TimerAbort;
   except
     //
   end;
@@ -868,9 +866,6 @@ procedure TSockClient.SocketReset;
 begin
   // Reset Socket
   FSocket := INVALID_SOCKET;
-
-  // Reset Timer
-  FTimerHwnd := INVALID_HANDLE_VALUE;
 
   // Reset Error Vars
   FProxyCode := SOCK_NO_ERROR;
