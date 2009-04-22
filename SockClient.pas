@@ -225,6 +225,8 @@ type
     procedure CloseConnection(CloseGraceful: Boolean);
     // Simple Request Stuff
     function SimpleRequest(const Request: string): Boolean;
+    function SimpleSend(const Request: string): Boolean;
+    function SimpleRecv(MsgRecv: Boolean = False): Boolean;
 
     // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
@@ -766,11 +768,39 @@ begin
   try
     Result := False;
 
+    // Send Request
+    if (SimpleSend(Request) = False) then Exit;
+    // Recieve Result Customize Recv Type
+    if (SimpleRecv(MsgRecv) = False) then Exit;
+
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+function TSockClient.SimpleSend(const Request: string): Boolean;
+begin
+  try
+    Result := False;
+
     // Write Request To Buffer
     WriteBuffer(FDocument, Pointer(Request), Length(Request));
 
     // Send Request
     if (SocketWrite = False) then Exit;
+
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+function TSockClient.SimpleRecv(MsgRecv: Boolean = False): Boolean;
+begin
+  try
+    Result := False;
+
     // Recieve Result Customize Recv Type
     if (SocketRead(MsgRecv) = False) then Exit;
 
