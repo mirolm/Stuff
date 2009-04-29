@@ -318,6 +318,42 @@ type
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
 
+const
+  ERROR_BUFFER_OVERFLOW = DWORD(111);
+
+type
+  IP_ADDRESS_STRING = record
+    S: array [0..15] of Char;
+  end;
+  PIP_ADDRESS_STRING = ^IP_ADDRESS_STRING;
+
+  IP_MASK_STRING = IP_ADDRESS_STRING;
+
+  PIP_ADDR_STRING = ^IP_ADDR_STRING;
+  IP_ADDR_STRING = record
+    Next: PIP_ADDR_STRING;
+    IpAddress: IP_ADDRESS_STRING;
+    IpMask: IP_MASK_STRING;
+    Context: DWORD;
+  end;
+
+  FIXED_INFO = record
+    HostName: array [0..128 + 3] of Char;
+    DomainName: array[0..128 + 3] of Char;
+    CurrentDnsServer: PIP_ADDR_STRING;
+    DnsServerList: IP_ADDR_STRING;
+    NodeType: UINT;
+    ScopeId: array [0..256 + 3] of Char;
+    EnableRouting: UINT;
+    EnableProxy: UINT;
+    EnableDns: UINT;
+  end;
+  PFIXED_INFO = ^FIXED_INFO;
+
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+
 type
   TWSAStartup = function(wVersionRequested: Word; var lpWSAData: TWSAData): Integer; stdcall;
   TWSACleanup = function: Integer; stdcall;
@@ -346,10 +382,12 @@ type
     ppQueryResults: PPDNS_RECORD; pReserved: PPVOID): DNS_STATUS; stdcall;
   TDnsRecordListFree = procedure(pRecordList: PDNS_RECORD; FreeType: DNS_FREE_TYPE); stdcall;
 
+  TGetNetworkParams = function(pFixedInfo: PFIXED_INFO; var pOutBufLen: ULONG): DWORD; stdcall;
 
 const
   LIB_WIN_SOCK             = 'ws2_32.dll';
   LIB_DNS_API              = 'dnsapi.dll';
+  LIB_IPHLP_API            = 'iphlpapi.dll';
 
   FUN_WSA_STARTUP          = 'WSAStartup';
   FUN_WSA_CLEANUP          = 'WSACleanup';
@@ -371,8 +409,10 @@ const
   FUN_INET_ADDR            = 'inet_addr';
   FUN_GET_HOST_BY_NAME     = 'gethostbyname';
 
-  FUNC_DNS_QUERY           = 'DnsQuery_A';
+  FUN_DNS_QUERY            = 'DnsQuery_A';
   FUN_DNS_RECORD_LIST_FREE = 'DnsRecordListFree';
+
+  FUN_GET_NETWORK_PARAMS   = 'GetNetworkParams';
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -461,6 +501,7 @@ type
 
     // DNS Stuff
     function GetMXRecords(const DNSServer, HostName: string; var MxRecords: TStringArray): Boolean;
+    function GetDnsAddrList(var DNSServers: TStringArray): Boolean;
 
     // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
@@ -495,10 +536,13 @@ type
 var
   IsWinSockOk: Boolean = False;
   IsDnsApiOk: Boolean = False;
+  IsIpHlpOk: Boolean = False;
+
   WSAData: TWSAData;
 
   WSLibHandle: THandle = 0;
   DNSLibHandle: THandle = 0;
+  IPHlpHandle: THandle = 0;
 
   WSAStartup: TWSAStartup = nil;
   WSACleanup: TWSACleanup = nil;
@@ -522,6 +566,8 @@ var
 
   DnsQuery: TDnsQuery = nil;
   DnsRecordListFree: TDnsRecordListFree = nil;
+
+  GetNetworkParams: TGetNetworkParams = nil;
 
 implementation
 
@@ -1191,7 +1237,7 @@ begin
       if (DnsQuery(PChar(HostName), DNS_TYPE_MX, DNS_QUERY_BYPASS_CACHE,
         PipArray, DnsRecord, nil) <> SOCK_NO_ERROR) then Exit;
 
-      // Get First Record In List  
+      // Get First Record In List
       TempRecord := DnsRecord^;
       repeat
         if (Assigned(TempRecord) = False) then Exit;
@@ -1227,6 +1273,64 @@ begin
   end;
 end;
 
+function TSockClient.GetDnsAddrList(var DNSServers: TStringArray): Boolean;
+var
+  FixedInfo  : PFIXED_INFO;
+  FixedLen   : Cardinal;
+  TempRecord : PIP_ADDR_STRING;
+  DnsLen     : Integer;
+  DnsString  : string;
+  
+begin
+  try
+    Result := False;
+    // Clear Record List
+    SetLength(DNSServers, 0);
+
+
+    // Check IpHlpIpi Init
+    if (IsIpHlpOk = False) then Exit;
+
+    FixedLen := SizeOf(FIXED_INFO);
+    FixedInfo := AllocMem(FixedLen);
+    try
+      // Get Network Params List
+      if (GetNetworkParams(FixedInfo, FixedLen) = ERROR_BUFFER_OVERFLOW) then
+      begin
+        // Buffer Too Small Resize
+        ReallocMem(FixedInfo, FixedLen);
+        // Retrieve Again
+        if (GetNetworkParams(FixedInfo, FixedLen) <> SOCK_NO_ERROR) then Exit;
+      end;
+
+      // Get First Record In List
+      TempRecord := Addr(FixedInfo.DnsServerList);
+      repeat
+        if (Assigned(TempRecord) = False) then Exit;
+
+        // Add Record To Array
+        DnsLen := SizeOf(TempRecord^.IpAddress);
+        SetLength(DnsString, DnsLen);
+        Move(TempRecord^.IpAddress, Pointer(DnsString)^, DnsLen);
+
+        SetLength(DNSServers, High(DNSServers) + 2);
+        DNSServers[High(DNSServers)] := Trim(DnsString);
+
+        // Get Next Record
+        TempRecord := TempRecord^.Next;
+      until (Assigned(TempRecord) = False);
+
+      // Success If Records Retrieved
+      Result := (High(DNSServers) > 0);
+    finally
+      FreeMem(FixedInfo);
+    end;
+  except
+    Result := False;
+    // Clear On Error
+    SetLength(DNSServers, 0);
+  end;
+end;
 
 // Buffer Routines
 procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer);
@@ -1374,6 +1478,7 @@ begin
   try
     IsWinSockOk := False;
     IsDnsApiOk := False;
+    IsIpHlpOk := False;
 
     // Attach To DLL, Get Routines
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
@@ -1398,8 +1503,11 @@ begin
     if (LoadFunc(WSLibHandle, @gethostbyname, FUN_GET_HOST_BY_NAME) = False) then Exit;
 
     if (LoadLib(DNSLibHandle, LIB_DNS_API) = False) then Exit;
-    if (LoadFunc(DNSLibHandle, @DnsQuery, FUNC_DNS_QUERY) = False) then Exit;
+    if (LoadFunc(DNSLibHandle, @DnsQuery, FUN_DNS_QUERY) = False) then Exit;
     if (LoadFunc(DNSLibHandle, @DnsRecordListFree, FUN_DNS_RECORD_LIST_FREE) = False) then Exit;
+
+    if (LoadLib(IPHlpHandle, LIB_IPHLP_API) = False) then Exit;
+    if (LoadFunc(IPHlpHandle, @GetNetworkParams, FUN_GET_NETWORK_PARAMS) = False) then Exit;
 
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
@@ -1407,9 +1515,11 @@ begin
     IsWinSockOk := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
 
     IsDnsApiOk := True;
+    IsIpHlpOk := True;
   except
     IsWinSockOk := False;
     IsDnsApiOk := False;
+    IsIpHlpOk := False;
   end;
 end;
 
@@ -1418,6 +1528,7 @@ begin
   try
     IsWinSockOk := False;
     IsDnsApiOk := False;
+    IsIpHlpOk := False;
 
     // Shut Down WinSock2
     WSACleanup;
@@ -1446,9 +1557,12 @@ begin
     DnsQuery := nil;
     DnsRecordListFree := nil;
 
+    GetNetworkParams := nil;
+
     // Detach From DLL
     ReleaseLib(WSLibHandle);
     ReleaseLib(DNSLibHandle);
+    ReleaseLib(IPHlpHandle);
   except
     IsWinSockOk := False;
     IsDnsApiOk := False;
