@@ -98,6 +98,226 @@ const
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
 
+const
+  DNS_TYPE_MX            = $000F;
+  DNS_QUERY_BYPASS_CACHE = $00000008;
+
+type
+  IP4_ADDRESS = DWORD;
+  QWORD = Int64;
+  IN6_ADDR = Pointer;
+  PPVOID = ^Pointer;
+  DNS_STATUS = Longint;
+  DNS_FREE_TYPE = (DnsFreeFlat, DnsFreeRecordList);
+
+  IP4_ARRAY = record
+    AddrCount: DWORD;
+    AddrArray: array [0..0] of IP4_ADDRESS;
+  end;
+  PIP4_ARRAY = ^IP4_ARRAY;
+
+  DNS_RECORD_FLAGS = record
+    Flags: DWORD;
+  end;
+
+  DNS_A_DATA = record
+    IpAddress: IP4_ADDRESS;
+  end;
+
+  DNS_SOA_DATA = record
+    pNamePrimaryServer: LPTSTR;
+    pNameAdministrator: LPTSTR;
+    dwSerialNo: DWORD;
+    dwRefresh: DWORD;
+    dwRetry: DWORD;
+    dwExpire: DWORD;
+    dwDefaultTtl: DWORD;
+  end;
+
+  DNS_PTR_DATA = record
+    pNameHost: LPTSTR;
+  end;
+
+  DNS_MINFO_DATA = record
+    pNameMailbox: LPTSTR;
+    pNameErrorsMailbox: LPTSTR;
+  end;
+
+  DNS_MX_DATA = record
+    pNameExchange: LPTSTR;
+    wPreference: Word;
+    Pad: Word;
+  end;
+
+  DNS_TXT_DATA = record
+    dwStringCount: DWORD;
+    pStringArray: array [0..0] of LPTSTR;
+  end;
+
+  DNS_NULL_DATA = record
+    dwByteCount: DWORD;
+    Data: array [0..0] of Byte;
+  end;
+
+  DNS_WKS_DATA = record
+    IpAddress: IP4_ADDRESS;
+    chProtocol: UCHAR;
+    BitMask: array [0..0] of Byte;
+  end;
+
+  DNS_IP6_ADDRESS = record
+    case Integer of
+      0: (IP6Qword: array [0..1] of QWORD);
+      1: (IP6Dword: array [0..3] of DWORD);
+      2: (IP6Word: array [0..7] of Word);
+      3: (IP6Byte: array [0..15] of Byte);
+      4: (In6: IN6_ADDR);
+  end;
+
+  DNS_AAAA_DATA = record
+    Ip6Address: DNS_IP6_ADDRESS;
+  end;
+
+  DNS_KEY_DATA = record
+    wFlags: Word;
+    chProtocol: Byte;
+    chAlgorithm: Byte;
+    Key: array [0..1 - 1] of Byte;
+  end;
+
+  DNS_SIG_DATA = record
+    pNameSigner: LPTSTR;
+    wTypeCovered: Word;
+    chAlgorithm: Byte;
+    chLabelCount: Byte;
+    dwOriginalTtl: DWORD;
+    dwExpiration: DWORD;
+    dwTimeSigned: DWORD;
+    wKeyTag: Word;
+    Pad: Word;
+    Signature: array [0..0] of Byte;
+  end;
+
+  DNS_ATMA_DATA = record
+    AddressType: Byte;
+    Address: array [0..20 - 1] of Byte;
+  end;
+
+  DNS_NXT_DATA = record
+    pNameNext: LPTSTR;
+    wNumTypes: Word;
+    wTypes: array [0..0] of Word;
+  end;
+
+  DNS_SRV_DATA = record
+    pNameTarget: LPTSTR;
+    wPriority: Word;
+    wWeight: Word;
+    wPort: Word;
+    Pad: Word;
+  end;
+
+  DNS_TKEY_DATA = record
+    pNameAlgorithm: LPTSTR;
+    pAlgorithmPacket: PByte;
+    pKey: PByte;
+    pOtherData: PByte;
+    dwCreateTime: DWORD;
+    dwExpireTime: DWORD;
+    wMode: Word;
+    wError: Word;
+    wKeyLength: Word;
+    wOtherLength: Word;
+    cAlgNameLength: UCHAR;
+    bPacketPointers: BOOL;
+  end;
+
+  DNS_TSIG_DATA = record
+    pNameAlgorithm: LPTSTR;
+    pAlgorithmPacket: PByte;
+    pSignature: PByte;
+    pOtherData: PByte;
+    i64CreateTime: LONGLONG;
+    wFudgeTime: Word;
+    wOriginalXid: Word;
+    wError: Word;
+    wSigLength: Word;
+    wOtherLength: Word;
+    cAlgNameLength: UCHAR;
+    bPacketPointers: BOOL;
+  end;
+
+  DNS_WINS_DATA = record
+    dwMappingFlag: DWORD;
+    dwLookupTimeout: DWORD;
+    dwCacheTimeout: DWORD;
+    cWinsServerCount: DWORD;
+    WinsServers: array [0..0] of IP4_ADDRESS;
+  end;
+
+  DNS_WINSR_DATA = record
+    dwMappingFlag: DWORD;
+    dwLookupTimeout: DWORD;
+    dwCacheTimeout: DWORD;
+    pNameResultDomain: LPTSTR;
+  end;
+
+  PPDNS_RECORD = ^PDNS_RECORD;
+  PDNS_RECORD = ^DNS_RECORD;
+
+  DNS_RECORD = record
+    pNext: PDNS_RECORD;
+    pName: LPTSTR;
+    wType: Word;
+    wDataLength: Word;
+    Flags: record
+    case Integer of
+      0: (DW: DWORD);
+      1: (S: DNS_RECORD_FLAGS);
+    end;
+    dwTtl: DWORD;
+    dwReserved: DWORD;
+
+    Data: record
+    case Integer of
+       0: (A: DNS_A_DATA);
+       1: (SOA, Soa_: DNS_SOA_DATA);
+       2: (PTR, Ptr_,
+           NS, Ns_,
+           CNAME, Cname_,
+           MB, Mb_,
+           MD, Md_,
+           MF, Mf_,
+           MG, Mg_,
+           MR, Mr_: DNS_PTR_DATA);
+       3: (MINFO, Minfo_,
+           RP, Rp_: DNS_MINFO_DATA);
+       4: (MX, Mx_,
+           AFSDB, Afsdb_,
+           RT, Rt_: DNS_MX_DATA);
+       5: (HINFO, Hinfo_,
+           ISDN, Isdn_,
+           TXT, Txt_,
+           X25: DNS_TXT_DATA);
+       6: (Null: DNS_NULL_DATA);
+       7: (WKS, Wks_: DNS_WKS_DATA);
+       8: (AAAA: DNS_AAAA_DATA);
+       9: (KEY, Key_: DNS_KEY_DATA);
+      10: (SIG, Sig_: DNS_SIG_DATA);
+      11: (ATMA, Atma_: DNS_ATMA_DATA);
+      12: (NXT, Nxt_: DNS_NXT_DATA);
+      13: (SRV, Srv_: DNS_SRV_DATA);
+      14: (TKEY, Tkey_: DNS_TKEY_DATA);
+      15: (TSIG, Tsig_: DNS_TSIG_DATA);
+      16: (WINS, Wins_: DNS_WINS_DATA);
+      17: (WINSR, WinsR_, NBSTAT, Nbstat_: DNS_WINSR_DATA);
+    end;
+  end;
+
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+// -------------------------------------------------------------------------- //
+
 type
   TWSAStartup = function(wVersionRequested: Word; var lpWSAData: TWSAData): Integer; stdcall;
   TWSACleanup = function: Integer; stdcall;
@@ -122,28 +342,37 @@ type
   TInet_addr = function(cp: PChar): Longint; stdcall;
   TGetHostByName = function(name: PChar): PHostEnt; stdcall;
 
-const
-  LIB_WIN_SOCK           = 'ws2_32.dll';
+  TDnsQuery = function(pszName: LPCTSTR; wType: WORD; Options: DWORD; aipServers: PIP4_ARRAY;
+    ppQueryResults: PPDNS_RECORD; pReserved: PPVOID): DNS_STATUS; stdcall;
+  TDnsRecordListFree = procedure(pRecordList: PDNS_RECORD; FreeType: DNS_FREE_TYPE); stdcall;
 
-  FUN_WSA_STARTUP        = 'WSAStartup';
-  FUN_WSA_CLEANUP        = 'WSACleanup';
-  FUN_WSA_GET_LAST_ERROR = 'WSAGetLastError';
-  FUN_WSA_SET_LAST_ERROR = 'WSASetLastError';
-  FUN_GET_SOCK_OPT       = 'getsockopt';
-  FUN_SET_SOCK_OPT       = 'setsockopt';
-  FUN_SOCKET             = 'socket';
-  FUN_IO_CTL_SOCKET      = 'ioctlsocket';
-  FUN_CONNECT            = 'connect';
-  FUN_SEND               = 'send';
-  FUN_RECV               = 'recv';
-  FUN_SHUTDOWN           = 'shutdown';
-  FUN_CLOSE_SOCKET       = 'closesocket';
-  FUN_WSA_CREATE_EVENT   = 'WSACreateEvent';
-  FUN_WSA_EVENT_SELECT   = 'WSAEventSelect';
-  FUN_WSA_CLOSE_EVENT    = 'WSACloseEvent';
-  FUN_HTONS              = 'htons';
-  FUN_INET_ADDR          = 'inet_addr';
-  FUN_GET_HOST_BY_NAME   = 'gethostbyname';
+
+const
+  LIB_WIN_SOCK             = 'ws2_32.dll';
+  LIB_DNS_API              = 'dnsapi.dll';
+
+  FUN_WSA_STARTUP          = 'WSAStartup';
+  FUN_WSA_CLEANUP          = 'WSACleanup';
+  FUN_WSA_GET_LAST_ERROR   = 'WSAGetLastError';
+  FUN_WSA_SET_LAST_ERROR   = 'WSASetLastError';
+  FUN_GET_SOCK_OPT         = 'getsockopt';
+  FUN_SET_SOCK_OPT         = 'setsockopt';
+  FUN_SOCKET               = 'socket';
+  FUN_IO_CTL_SOCKET        = 'ioctlsocket';
+  FUN_CONNECT              = 'connect';
+  FUN_SEND                 = 'send';
+  FUN_RECV                 = 'recv';
+  FUN_SHUTDOWN             = 'shutdown';
+  FUN_CLOSE_SOCKET         = 'closesocket';
+  FUN_WSA_CREATE_EVENT     = 'WSACreateEvent';
+  FUN_WSA_EVENT_SELECT     = 'WSAEventSelect';
+  FUN_WSA_CLOSE_EVENT      = 'WSACloseEvent';
+  FUN_HTONS                = 'htons';
+  FUN_INET_ADDR            = 'inet_addr';
+  FUN_GET_HOST_BY_NAME     = 'gethostbyname';
+
+  FUNC_DNS_QUERY           = 'DnsQuery_A';
+  FUN_DNS_RECORD_LIST_FREE = 'DnsRecordListFree';
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -185,6 +414,8 @@ type
     Dummy2   : Word;  // Ignored
     Dummy3   : DWORD; // Ignored
   end;
+
+  TStringArray = array of string;
 
 type
   TSockClient = class(TObject)
@@ -228,6 +459,9 @@ type
     function SimpleSend(const Request: string): Boolean;
     function SimpleRecv(MsgRecv: Boolean = False): Boolean;
 
+    // DNS Stuff
+    function GetMXRecords(const DNSServer, HostName: string; var MxRecords: TStringArray): Boolean;
+
     // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
     property TargetHost: string read FTargetHost write FTargetHost;
@@ -260,9 +494,11 @@ type
 
 var
   IsWinSockOk: Boolean = False;
+  IsDnsApiOk: Boolean = False;
   WSAData: TWSAData;
 
   WSLibHandle: THandle = 0;
+  DNSLibHandle: THandle = 0;
 
   WSAStartup: TWSAStartup = nil;
   WSACleanup: TWSACleanup = nil;
@@ -283,6 +519,9 @@ var
   htons: Thtons = nil;
   inet_addr: TInet_addr = nil;
   gethostbyname: TGetHostByName = nil;
+
+  DnsQuery: TDnsQuery = nil;
+  DnsRecordListFree: TDnsRecordListFree = nil;
 
 implementation
 
@@ -923,6 +1162,72 @@ begin
   end;
 end;
 
+// DNS Stuff
+function TSockClient.GetMXRecords(const DNSServer, HostName: string; var MxRecords: TStringArray): Boolean;
+var
+  PipArray   : PIP4_ARRAY;
+  DnsRecord  : PPDNS_RECORD;
+  TempRecord : PDNS_RECORD;
+  MxLen      : Integer;
+  MxString   : string;
+  
+begin
+  try
+    Result := False;
+    // Clear Record List
+    SetLength(MxRecords, 0);
+
+    // Check DnsApi Init
+    if (IsDnsApiOk = False) then Exit;
+
+    New(PipArray);
+    New(DnsRecord);
+    try
+      // Prepare DNS Server
+      PipArray.AddrCount := 1;
+      PipArray.AddrArray[0] := SocketResolve(DNSServer);
+
+      // Query DNS Server
+      if (DnsQuery(PChar(HostName), DNS_TYPE_MX, DNS_QUERY_BYPASS_CACHE,
+        PipArray, DnsRecord, nil) <> SOCK_NO_ERROR) then Exit;
+
+      // Get First Record In List  
+      TempRecord := DnsRecord^;
+      repeat
+        if (Assigned(TempRecord) = False) then Exit;
+
+        // Check For MX Record
+        if (TempRecord^.wType = DNS_TYPE_MX) then
+        begin
+          // Add Record To Array
+          MxLen := StrLen(TempRecord^.Data.MX.pNameExchange);
+          SetLength(MxString, MxLen);
+          Move(Pointer(TempRecord^.Data.MX.pNameExchange)^, Pointer(MxString)^, MxLen);
+
+          SetLength(MxRecords, High(MxRecords) + 2);
+          MxRecords[High(MxRecords)] := MxString;
+        end;
+
+        // Get Next Record
+        TempRecord := TempRecord^.pNext;
+      until (Assigned(TempRecord) = False);
+
+      // Success If Records Retrieved
+      Result := (High(MxRecords) > 0);
+    finally
+      Dispose(PipArray);
+      // Free Record List
+      DnsRecordListFree(DnsRecord^, DnsFreeRecordList);
+      Dispose(DnsRecord);
+    end;
+  except
+    Result := False;
+    // Clear On Error
+    SetLength(MxRecords, 0);
+  end;
+end;
+
+
 // Buffer Routines
 procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer);
 var
@@ -1068,6 +1373,7 @@ procedure InitLib;
 begin
   try
     IsWinSockOk := False;
+    IsDnsApiOk := False;
 
     // Attach To DLL, Get Routines
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
@@ -1091,12 +1397,19 @@ begin
     if (LoadFunc(WSLibHandle, @inet_addr, FUN_INET_ADDR) = False) then Exit;
     if (LoadFunc(WSLibHandle, @gethostbyname, FUN_GET_HOST_BY_NAME) = False) then Exit;
 
+    if (LoadLib(DNSLibHandle, LIB_DNS_API) = False) then Exit;
+    if (LoadFunc(DNSLibHandle, @DnsQuery, FUNC_DNS_QUERY) = False) then Exit;
+    if (LoadFunc(DNSLibHandle, @DnsRecordListFree, FUN_DNS_RECORD_LIST_FREE) = False) then Exit;
+
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
     // Startup WinSock2
     IsWinSockOk := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
+
+    IsDnsApiOk := True;
   except
     IsWinSockOk := False;
+    IsDnsApiOk := False;
   end;
 end;
 
@@ -1104,6 +1417,7 @@ procedure FreeLib;
 begin
   try
     IsWinSockOk := False;
+    IsDnsApiOk := False;
 
     // Shut Down WinSock2
     WSACleanup;
@@ -1129,10 +1443,15 @@ begin
     inet_addr := nil;
     gethostbyname := nil;
 
+    DnsQuery := nil;
+    DnsRecordListFree := nil;
+
     // Detach From DLL
     ReleaseLib(WSLibHandle);
+    ReleaseLib(DNSLibHandle);
   except
     IsWinSockOk := False;
+    IsDnsApiOk := False;
   end;
 end;
 
