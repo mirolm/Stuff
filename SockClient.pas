@@ -320,8 +320,15 @@ type
 
 const
   ERROR_BUFFER_OVERFLOW = DWORD(111);
+  IP_STATUS_BASE        = 11000;
+  IP_SUCCESS            = 0;
 
 type
+  HANDLE = THandle;
+  LPVOID = Pointer;
+  IPAddr = ULONG;
+  USHORT = Word;
+
   IP_ADDRESS_STRING = record
     S: array [0..15] of Char;
   end;
@@ -349,6 +356,26 @@ type
     EnableDns: UINT;
   end;
   PFIXED_INFO = ^FIXED_INFO;
+
+  IP_OPTION_INFORMATION = record
+    Ttl: UCHAR;
+    Tos: UCHAR;
+    Flags: UCHAR;
+    OptionsSize: UCHAR;
+    OptionsData: PUCHAR;
+  end;
+  PIP_OPTION_INFORMATION = ^IP_OPTION_INFORMATION;
+
+  ICMP_ECHO_REPLY = record
+    Address: IPAddr;
+    Status: ULONG;
+    RoundTripTime: ULONG;
+    DataSize: USHORT;
+    Reserved: USHORT;
+    Data: LPVOID;
+    Options: IP_OPTION_INFORMATION;
+  end;
+  PICMP_ECHO_REPLY = ^ICMP_ECHO_REPLY;
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -384,10 +411,17 @@ type
 
   TGetNetworkParams = function(pFixedInfo: PFIXED_INFO; var pOutBufLen: ULONG): DWORD; stdcall;
 
+  TIcmpCreateFile = function: HANDLE; stdcall;
+  TIcmpSendEcho = function(IcmpHandle: HANDLE; DestinationAddress: IpAddr; RequestData: LPVOID;
+    RequestSize: WORD; RequestOptions: PIP_OPTION_INFORMATION; ReplyBuffer: LPVOID;
+    ReplySize: DWORD; Timeout: DWORD): DWORD; stdcall;
+  TIcmpCloseHandle = function(IcmpHandle: HANDLE): BOOL; stdcall;
+  
 const
   LIB_WIN_SOCK             = 'ws2_32.dll';
   LIB_DNS_API              = 'dnsapi.dll';
   LIB_IPHLP_API            = 'iphlpapi.dll';
+  LIB_ICMP                 = 'icmp.dll';
 
   FUN_WSA_STARTUP          = 'WSAStartup';
   FUN_WSA_CLEANUP          = 'WSACleanup';
@@ -413,6 +447,10 @@ const
   FUN_DNS_RECORD_LIST_FREE = 'DnsRecordListFree';
 
   FUN_GET_NETWORK_PARAMS   = 'GetNetworkParams';
+
+  FUN_ICMP_CREATE_FILE     = 'IcmpCreateFile';
+  FUN_ICMP_SEND_ECHO       = 'IcmpSendEcho';
+  FUN_ICMP_CLOSE_HANDLE    = 'IcmpCloseHandle';
 
 // -------------------------------------------------------------------------- //
 // -------------------------------------------------------------------------- //
@@ -502,6 +540,7 @@ type
     // DNS Stuff
     function GetMXRecords(const DNSServer, HostName: string; var MxRecords: TStringArray): Boolean;
     function GetDnsAddrList(var DNSServers: TStringArray): Boolean;
+    function PingHost(const TargetHost: string; PingTimeout: Integer = 1000): Boolean;
 
     // Socket Connect Stuff
     property Timeout: Integer read FTimeout write FTimeout;
@@ -537,12 +576,14 @@ var
   IsWinSockOk: Boolean = False;
   IsDnsApiOk: Boolean = False;
   IsIpHlpOk: Boolean = False;
+  IsIcmpOk: Boolean = False;
 
   WSAData: TWSAData;
 
   WSLibHandle: THandle = 0;
   DNSLibHandle: THandle = 0;
-  IPHlpHandle: THandle = 0;
+  IPHlpLibHandle: THandle = 0;
+  IcmpLibHandle: THandle = 0;
 
   WSAStartup: TWSAStartup = nil;
   WSACleanup: TWSACleanup = nil;
@@ -568,6 +609,10 @@ var
   DnsRecordListFree: TDnsRecordListFree = nil;
 
   GetNetworkParams: TGetNetworkParams = nil;
+
+  IcmpCreateFile: TIcmpCreateFile = nil;
+  IcmpSendEcho: TIcmpSendEcho = nil;
+  IcmpCloseHandle: TIcmpCloseHandle = nil;
 
 implementation
 
@@ -1332,6 +1377,59 @@ begin
   end;
 end;
 
+function TSockClient.PingHost(const TargetHost: string; PingTimeout: Integer = 1000): Boolean;
+var
+  IcmpHandle : THandle;
+  SendBuffer : Pointer;
+  SendSize   : Integer;
+  RecvBuffer : PICMP_ECHO_REPLY;
+  RecvSize   : Integer;
+  IpAddress  : IpAddr;
+
+begin
+  try
+    Result := False;
+
+    // Check IpHlpIpi, Icmp Init
+    if (IsIpHlpOk = False) then Exit;
+    if (IsIcmpOk = False) then Exit;
+
+    // Init Pointers
+    SendBuffer := nil;
+    RecvBuffer := nil;
+
+    // Get Request Handle
+    IcmpHandle := IcmpCreateFile;
+    if (IcmpHandle = INVALID_HANDLE_VALUE) then Exit;
+    try
+      // Resolve Host
+      IpAddress := SocketResolve(TargetHost);
+
+      // Prepare Buffers
+      SendSize := 32;
+      SendBuffer := AllocMem(SendSize);
+
+      RecvSize := SizeOf(ICMP_ECHO_REPLY) + SendSize;
+      RecvBuffer := AllocMem(RecvSize);
+
+      // Send Ping Request
+      if (IcmpSendEcho(IcmpHandle, IpAddress, SendBuffer, SendSize, nil,
+        RecvBuffer, RecvSize, PingTimeout) = SOCK_NO_ERROR) then Exit;
+
+      // Check Request Status
+      Result := (RecvBuffer^.Status = IP_SUCCESS) or (RecvBuffer^.Status = IP_STATUS_BASE);
+    finally
+      // Must Free Request Handle
+      IcmpCloseHandle(IcmpHandle);
+      // Free Buffers
+      FreeMem(SendBuffer);
+      FreeMem(RecvBuffer);
+    end;
+  except
+    Result := False;
+  end;
+end;
+
 // Buffer Routines
 procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer);
 var
@@ -1479,6 +1577,7 @@ begin
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
+    IsIcmpOk := False;
 
     // Attach To DLL, Get Routines
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
@@ -1506,8 +1605,25 @@ begin
     if (LoadFunc(DNSLibHandle, @DnsQuery, FUN_DNS_QUERY) = False) then Exit;
     if (LoadFunc(DNSLibHandle, @DnsRecordListFree, FUN_DNS_RECORD_LIST_FREE) = False) then Exit;
 
-    if (LoadLib(IPHlpHandle, LIB_IPHLP_API) = False) then Exit;
-    if (LoadFunc(IPHlpHandle, @GetNetworkParams, FUN_GET_NETWORK_PARAMS) = False) then Exit;
+    if (LoadLib(IPHlpLibHandle, LIB_IPHLP_API) = False) then Exit;
+    if (LoadLib(IcmpLibHandle, LIB_ICMP) = False) then Exit;
+    if (LoadFunc(IPHlpLibHandle, @GetNetworkParams, FUN_GET_NETWORK_PARAMS) = False) then Exit;
+
+    // Win2k - icmp.dll, WinXP And Later --> iphlpapi.dll
+    if (LoadFunc(IPHlpLibHandle, @IcmpCreateFile, FUN_ICMP_CREATE_FILE) = False) then
+    begin
+      if (LoadFunc(IcmpLibHandle, @IcmpCreateFile, FUN_ICMP_CREATE_FILE) = False) then Exit;
+    end;
+
+    if (LoadFunc(IPHlpLibHandle, @IcmpSendEcho, FUN_ICMP_SEND_ECHO) = False) then
+    begin
+      if (LoadFunc(IcmpLibHandle, @IcmpSendEcho, FUN_ICMP_SEND_ECHO) = False) then Exit;
+    end;
+
+    if (LoadFunc(IPHlpLibHandle, @IcmpCloseHandle, FUN_ICMP_CLOSE_HANDLE) = False) then
+    begin
+      if (LoadFunc(IcmpLibHandle, @IcmpCloseHandle, FUN_ICMP_CLOSE_HANDLE) = False) then Exit;
+    end;
 
     // Init Struct
     ZeroMemory(@WSAData, SizeOf(WSAData));
@@ -1516,10 +1632,12 @@ begin
 
     IsDnsApiOk := True;
     IsIpHlpOk := True;
+    IsIcmpOk := True;
   except
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
+    IsIcmpOk := False;
   end;
 end;
 
@@ -1529,6 +1647,7 @@ begin
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
+    IsIcmpOk := False;
 
     // Shut Down WinSock2
     WSACleanup;
@@ -1559,13 +1678,20 @@ begin
 
     GetNetworkParams := nil;
 
+    IcmpCreateFile := nil;
+    IcmpSendEcho := nil;
+    IcmpCloseHandle := nil;
+
     // Detach From DLL
     ReleaseLib(WSLibHandle);
     ReleaseLib(DNSLibHandle);
-    ReleaseLib(IPHlpHandle);
+    ReleaseLib(IPHlpLibHandle);
+    ReleaseLib(IcmpLibHandle);
   except
     IsWinSockOk := False;
     IsDnsApiOk := False;
+    IsIpHlpOk := False;
+    IsIcmpOk := False;
   end;
 end;
 
