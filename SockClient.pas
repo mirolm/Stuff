@@ -1346,7 +1346,6 @@ begin
     // Clear Record List
     SetLength(DNSServers, 0);
 
-
     // Check IpHlpIpi Init
     if (IsIpHlpOk = False) then Exit;
 
