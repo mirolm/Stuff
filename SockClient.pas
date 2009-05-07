@@ -413,10 +413,10 @@ type
 
   TIcmpCreateFile = function: HANDLE; stdcall;
   TIcmpSendEcho = function(IcmpHandle: HANDLE; DestinationAddress: IpAddr; RequestData: LPVOID;
-    RequestSize: WORD; RequestOptions: PIP_OPTION_INFORMATION; ReplyBuffer: LPVOID;
+    RequestSize: Word; RequestOptions: PIP_OPTION_INFORMATION; ReplyBuffer: LPVOID;
     ReplySize: DWORD; Timeout: DWORD): DWORD; stdcall;
   TIcmpCloseHandle = function(IcmpHandle: HANDLE): BOOL; stdcall;
-  
+
 const
   LIB_WIN_SOCK             = 'ws2_32.dll';
   LIB_DNS_API              = 'dnsapi.dll';
