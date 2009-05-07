@@ -744,6 +744,9 @@ begin
       SockAddr.sa_family := AF_INET;
       SockAddr.sin_addr.S_addr := SocketResolve(ConnectHost);
 
+      // Check Resolve Result
+      if (SockAddr.sin_addr.S_addr = 0) then Exit; 
+
       // Connect To Target Machine
       SockRes := connect(FSocket, @SockAddr, SizeOf(SockAddr));
       // Check Return Values To Be Sure
@@ -803,6 +806,9 @@ begin
       SocksIn.HostAddr := SocketResolve(SOCKS_HOST)
     else
       SocksIn.HostAddr := SocketResolve(ConnectHost);
+
+    // Check Resolve Result
+    if (SocksIn.HostAddr = 0) then Exit;
 
     // Write To Temporary Buffer
     WriteBuffer(FDocument, @SocksIn, SizeOf(SocksIn));
@@ -1055,7 +1061,11 @@ begin
     begin
       // Convert Host To Network Byte Order
       HostEnt := gethostbyname(PChar(TargetHost));
-      Result := LongInt(PLongint(HostEnt.h_addr_list^)^);
+      // Check Result If TargetHost Wrong
+      if Assigned(HostEnt) then
+        Result := LongInt(PLongint(HostEnt.h_addr_list^)^)
+      else
+        Result := 0;
     end;
   except
     Result := 0;
@@ -1278,6 +1288,9 @@ begin
       PipArray^.AddrCount := 1;
       PipArray^.AddrArray[0] := SocketResolve(DNSServer);
 
+      // Check Resolve Result
+      if (PipArray^.AddrArray[0] = 0) then Exit;
+
       // Query DNS Server
       if (DnsQuery(PAnsiChar(HostName), DNS_TYPE_MX, DNS_QUERY_BYPASS_CACHE,
         PipArray, DnsRecord, nil) <> SOCK_NO_ERROR) then Exit;
@@ -1405,6 +1418,9 @@ begin
     try
       // Resolve Host
       IpAddress := SocketResolve(TargetHost);
+
+      // Check Resolve Result
+      if (IpAddress = 0) then Exit;
 
       // Prepare Buffers
       SendSize := 32;
