@@ -405,7 +405,7 @@ type
   TInet_addr = function(cp: PChar): Longint; stdcall;
   TGetHostByName = function(name: PChar): PHostEnt; stdcall;
 
-  TDnsQuery = function(pszName: LPCTSTR; wType: WORD; Options: DWORD; aipServers: PIP4_ARRAY;
+  TDnsQuery = function(pszName: LPCTSTR; wType: Word; Options: DWORD; aipServers: PIP4_ARRAY;
     ppQueryResults: PPDNS_RECORD; pReserved: PPVOID): DNS_STATUS; stdcall;
   TDnsRecordListFree = procedure(pRecordList: PDNS_RECORD; FreeType: DNS_FREE_TYPE); stdcall;
 
@@ -1275,11 +1275,11 @@ begin
     New(DnsRecord);
     try
       // Prepare DNS Server
-      PipArray.AddrCount := 1;
-      PipArray.AddrArray[0] := SocketResolve(DNSServer);
+      PipArray^.AddrCount := 1;
+      PipArray^.AddrArray[0] := SocketResolve(DNSServer);
 
       // Query DNS Server
-      if (DnsQuery(PChar(HostName), DNS_TYPE_MX, DNS_QUERY_BYPASS_CACHE,
+      if (DnsQuery(PAnsiChar(HostName), DNS_TYPE_MX, DNS_QUERY_BYPASS_CACHE,
         PipArray, DnsRecord, nil) <> SOCK_NO_ERROR) then Exit;
 
       // Get First Record In List
@@ -1303,12 +1303,13 @@ begin
         TempRecord := TempRecord^.pNext;
       until (Assigned(TempRecord) = False);
 
+      // Free Record List
+      DnsRecordListFree(DnsRecord^, DnsFreeRecordList);
+
       // Success If Records Retrieved
       Result := (High(MxRecords) > 0);
     finally
       Dispose(PipArray);
-      // Free Record List
-      DnsRecordListFree(DnsRecord^, DnsFreeRecordList);
       Dispose(DnsRecord);
     end;
   except
