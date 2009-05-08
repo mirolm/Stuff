@@ -560,6 +560,7 @@ type
   // Buffer Routines
   procedure ResizeBuffer(var BufferRec: TBufferRec; Needed: Integer; Initial: Integer = 0);
   procedure WriteBuffer(var BufferRec: TBufferRec; BuffData: Pointer; BuffLen: Integer; WritePos: Integer = 0);
+  function ReadBuffer(DataPtr: Pointer; DataLen: Cardinal; TrimIt: Boolean = False): string; overload
   function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer): string; overload;
   procedure ReadBuffer(BufferRec: TBufferRec; BuffData: Pointer; ChunkSize: Integer); overload;
 
@@ -1269,8 +1270,6 @@ var
   PipArray   : PIP4_ARRAY;
   DnsRecord  : PPDNS_RECORD;
   TempRecord : PDNS_RECORD;
-  MxLen      : Integer;
-  MxString   : string;
 
 begin
   try
@@ -1304,12 +1303,8 @@ begin
         if (TempRecord^.wType = DNS_TYPE_MX) then
         begin
           // Add Record To Array
-          MxLen := StrLen(TempRecord^.Data.MX.pNameExchange);
-          SetLength(MxString, MxLen);
-          Move(Pointer(TempRecord^.Data.MX.pNameExchange)^, Pointer(MxString)^, MxLen);
-
           SetLength(MxRecords, High(MxRecords) + 2);
-          MxRecords[High(MxRecords)] := MxString;
+          MxRecords[High(MxRecords)] := ReadBuffer(TempRecord^.Data.MX.pNameExchange, StrLen(TempRecord^.Data.MX.pNameExchange));
         end;
 
         // Get Next Record
@@ -1337,8 +1332,6 @@ var
   FixedInfo  : PFIXED_INFO;
   FixedLen   : Cardinal;
   TempRecord : PIP_ADDR_STRING;
-  DnsLen     : Integer;
-  DnsString  : string;
 
 begin
   try
@@ -1375,12 +1368,8 @@ begin
         if (Assigned(TempRecord) = False) then Exit;
 
         // Add Record To Array
-        DnsLen := SizeOf(TempRecord^.IpAddress);
-        SetLength(DnsString, DnsLen);
-        Move(TempRecord^.IpAddress, Pointer(DnsString)^, DnsLen);
-
         SetLength(DNSServers, High(DNSServers) + 2);
-        DNSServers[High(DNSServers)] := Trim(DnsString);
+        DNSServers[High(DNSServers)] := ReadBuffer(Addr(TempRecord^.IpAddress), SizeOf(TempRecord^.IpAddress), True);
 
         // Get Next Record
         TempRecord := TempRecord^.Next;
@@ -1499,6 +1488,34 @@ begin
   end;
 end;
 
+function ReadBuffer(DataPtr: Pointer; DataLen: Cardinal; TrimIt: Boolean = False): string; overload
+var
+  TempResult: string;
+
+begin
+  try
+    // Reset Values
+    TempResult := '';
+
+    // Check Input Data
+    if (Assigned(DataPtr) = True) and (DataLen > 0) then
+    begin
+      // Resize String
+      SetLength(TempResult, DataLen);
+      // Copy Data To String
+      Move(DataPtr^, Pointer(TempResult)^, DataLen);
+    end;
+
+    if TrimIt then
+      Result := Trim(TempResult)
+    else
+      Result := TempResult;
+  except
+    // Reset Values
+    Result := '';
+  end;
+end;
+
 function ReadBuffer(BufferRec: TBufferRec; ChunkSize: Integer): string;
 begin
   try
@@ -1508,8 +1525,7 @@ begin
     if Assigned(BufferRec.Buffer) and (BufferRec.Actual >= ChunkSize) and (ChunkSize > 0) then
     begin
       // Resize Result String
-      SetLength(Result, ChunkSize);
-      Move(Pointer(BufferRec.Buffer)^, Pointer(Result)^, ChunkSize);
+      Result := ReadBuffer(BufferRec.Buffer, ChunkSize);
     end;
   except
     Result := '';
