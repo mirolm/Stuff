@@ -1339,7 +1339,7 @@ var
   TempRecord : PIP_ADDR_STRING;
   DnsLen     : Integer;
   DnsString  : string;
-  
+
 begin
   try
     Result := False;
@@ -1353,12 +1353,20 @@ begin
     FixedInfo := AllocMem(FixedLen);
     try
       // Get Network Params List
-      if (GetNetworkParams(FixedInfo, FixedLen) = ERROR_BUFFER_OVERFLOW) then
-      begin
-        // Buffer Too Small Resize
-        ReallocMem(FixedInfo, FixedLen);
-        // Retrieve Again
-        if (GetNetworkParams(FixedInfo, FixedLen) <> SOCK_NO_ERROR) then Exit;
+      case GetNetworkParams(FixedInfo, FixedLen) of
+        ERROR_BUFFER_OVERFLOW: begin
+          // Buffer Too Small Resize
+          ReallocMem(FixedInfo, FixedLen);
+          // Retrieve Again
+          if (GetNetworkParams(FixedInfo, FixedLen) <> SOCK_NO_ERROR) then Exit;
+        end;
+
+        SOCK_NO_ERROR: begin
+          // Command Successfull
+        end;
+      else
+        // All Other Errors Fail
+        Exit;
       end;
 
       // Get First Record In List
