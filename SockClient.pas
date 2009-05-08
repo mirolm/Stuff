@@ -745,7 +745,7 @@ begin
       SockAddr.sin_addr.S_addr := SocketResolve(ConnectHost);
 
       // Check Resolve Result
-      if (SockAddr.sin_addr.S_addr = 0) then Exit; 
+      if (SockAddr.sin_addr.S_addr = 0) then Exit;
 
       // Connect To Target Machine
       SockRes := connect(FSocket, @SockAddr, SizeOf(SockAddr));
@@ -1271,7 +1271,7 @@ var
   TempRecord : PDNS_RECORD;
   MxLen      : Integer;
   MxString   : string;
-  
+
 begin
   try
     Result := False;
