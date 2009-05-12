@@ -1245,6 +1245,7 @@ begin
   if Assigned(FDocument.Buffer) and (FDocument.Length > 0) then
   begin
     ZeroMemory(FDocument.Buffer, FDocument.Length);
+    FDocument.Actual := 0;
   end;
 
   // Reset Errors
