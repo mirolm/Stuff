@@ -580,6 +580,7 @@ var
   IsIcmpOk: Boolean = False;
 
   WSAData: TWSAData;
+  WSALock: TRTLCriticalSection;
 
   WSLibHandle: THandle = 0;
   DNSLibHandle: THandle = 0;
@@ -1060,13 +1061,19 @@ begin
     // Convert Failed This Is Host
     if (Result = Longint(INADDR_NONE)) then
     begin
-      // Convert Host To Network Byte Order
-      HostEnt := gethostbyname(PChar(TargetHost));
-      // Check Result If TargetHost Wrong
-      if Assigned(HostEnt) then
-        Result := LongInt(PLongint(HostEnt.h_addr_list^)^)
-      else
-        Result := 0;
+      EnterCriticalSection(WSALock);
+      try
+        // Must Be Protected By Critical Section
+        // Convert Host To Network Byte Order
+        HostEnt := gethostbyname(PChar(TargetHost));
+        // Check Result If TargetHost Wrong
+        if Assigned(HostEnt) then
+          Result := LongInt(PLongint(HostEnt.h_addr_list^)^)
+        else
+          Result := 0;
+      finally
+        LeaveCriticalSection(WSALock);
+      end;
     end;
   except
     Result := 0;
@@ -1671,6 +1678,9 @@ begin
     // Startup WinSock2
     IsWinSockOk := (WSAStartup(MakeWord(2, 2), WSAData) = SOCK_NO_ERROR);
 
+    // Init Socket Critical Section
+    InitializeCriticalSection(WSALock);
+
     IsDnsApiOk := True;
     IsIpHlpOk := True;
     IsIcmpOk := True;
@@ -1692,6 +1702,9 @@ begin
 
     // Shut Down WinSock2
     WSACleanup;
+
+    // Delete Socket Critical Section
+    DeleteCriticalSection(WSALock);
 
     // Cleanup Routines
     WSAStartup := nil;
