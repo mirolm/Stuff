@@ -513,7 +513,7 @@ type
     procedure TimerAbort(var TimerHwnd: THandle);
     // Socket Connect
     function SocketConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
-    function ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
+    function ProxyConnect(const ConnectHost: string; ConnectPort: Word; ProxyResolve: Boolean = False): Boolean;
     function SocketResolve(const TargetHost: string): Longint;
     procedure SocketClose(CloseGraceful: Boolean = False);
     // Socket Operations
@@ -577,7 +577,6 @@ var
   IsWinSockOk: Boolean = False;
   IsDnsApiOk: Boolean = False;
   IsIpHlpOk: Boolean = False;
-  IsIcmpOk: Boolean = False;
 
   WSAData: TWSAData;
   WSALock: TRTLCriticalSection;
@@ -779,7 +778,7 @@ begin
   end;
 end;
 
-function TSockClient.ProxyConnect(const ConnectHost: string; ConnectPort: Word): Boolean;
+function TSockClient.ProxyConnect(const ConnectHost: string; ConnectPort: Word; ProxyResolve: Boolean = False): Boolean;
 var
   SocksIn  : TSocksReq;
   SocksOut : TSocksResp;
@@ -804,7 +803,7 @@ begin
 
     // Use SOCKS4A Resolve In Proxy
     // Add Invalid IP(0.0.0.x) In Strtuct
-    if Resolver then
+    if ProxyResolve then
       SocksIn.HostAddr := SocketResolve(SOCKS_HOST)
     else
       SocksIn.HostAddr := SocketResolve(ConnectHost);
@@ -822,7 +821,7 @@ begin
 
     // Use SOCKS4A Resolve In Proxy
     // Add Additional Field For Host Resolve
-    if Resolver then
+    if ProxyResolve then
     begin
       // Write Resolve Host
       WriteBuffer(FDocument, PChar(ConnectHost), Length(ConnectHost), FDocument.Actual);
@@ -1097,7 +1096,7 @@ begin
       // Connect To SOCKS Proxy
       if (SocketConnect(FProxyHost, FProxyPort) = False) then Exit;
       // Create Tunnel To Target Host
-      if (ProxyConnect(FTargetHost, FTargetPort) = False) then Exit;
+      if (ProxyConnect(FTargetHost, FTargetPort, FResolver) = False) then Exit;
     end
     else
     begin
@@ -1210,29 +1209,28 @@ begin
     Result := SOCKET_ERROR;
 
     // Check WinSock2 Init
-    if IsWinSockOk then
+    if (IsWinSockOk = False) then Exit;
+
+    // Errors Returned From WSAGetLastError And getsockopt(SO_ERROR)
+    // Are Two Different Things. Do Not Rely To WSAGetLastError
+    // WSAGetLastError - WinSock2 Specific Errors
+    // getsockopt(SO_ERROR) - Socket Errors
+    Result := WSAGetLastError;
+
+    // Reset Error Code
+    SockErr := SOCK_NO_ERROR;
+    // Get Correct Buffer Size
+    OptLen := SizeOf(SockErr);
+
+    // Even If Failed Socket Will Signal Event
+    if (getsockopt(FSocket, SOL_SOCKET, SO_ERROR, @SockErr, OptLen) = SOCK_NO_ERROR) then
     begin
-      // Errors Returned From WSAGetLastError And getsockopt(SO_ERROR)
-      // Are Two Different Things. Do Not Rely To WSAGetLastError
-      // WSAGetLastError - WinSock2 Specific Errors
-      // getsockopt(SO_ERROR) - Socket Errors
-      Result := WSAGetLastError;
-
-      // Reset Error Code
-      SockErr := SOCK_NO_ERROR;
-      // Get Correct Buffer Size
-      OptLen := SizeOf(SockErr);
-
-      // Even If Failed Socket Will Signal Event
-      if (getsockopt(FSocket, SOL_SOCKET, SO_ERROR, @SockErr, OptLen) = SOCK_NO_ERROR) then
+      // Reset Only On Socket Error
+      if (SockErr <> SOCK_NO_ERROR) then
       begin
-        // Reset Only On Socket Error
-        if (SockErr <> SOCK_NO_ERROR) then
-        begin
-          Result := SockErr;
-          // Reset WinSock2 Error Too
-          WSASetLastError(SockErr);
-        end;
+        Result := SockErr;
+        // Reset WinSock2 Error Too
+        WSASetLastError(SockErr);
       end;
     end;
   except
@@ -1252,6 +1250,7 @@ begin
   if Assigned(FDocument.Buffer) and (FDocument.Length > 0) then
   begin
     ZeroMemory(FDocument.Buffer, FDocument.Length);
+    // Reset Fill Counter
     FDocument.Actual := 0;
   end;
 
@@ -1410,7 +1409,6 @@ begin
 
     // Check IpHlpIpi, Icmp Init
     if (IsIpHlpOk = False) then Exit;
-    if (IsIcmpOk = False) then Exit;
 
     // Init Pointers
     SendBuffer := nil;
@@ -1625,7 +1623,6 @@ begin
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
-    IsIcmpOk := False;
 
     // Attach To DLL, Get Routines
     if (LoadLib(WSLibHandle, LIB_WIN_SOCK) = False) then Exit;
@@ -1683,12 +1680,10 @@ begin
 
     IsDnsApiOk := True;
     IsIpHlpOk := True;
-    IsIcmpOk := True;
   except
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
-    IsIcmpOk := False;
   end;
 end;
 
@@ -1698,7 +1693,6 @@ begin
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
-    IsIcmpOk := False;
 
     // Shut Down WinSock2
     WSACleanup;
@@ -1745,7 +1739,6 @@ begin
     IsWinSockOk := False;
     IsDnsApiOk := False;
     IsIpHlpOk := False;
-    IsIcmpOk := False;
   end;
 end;
 
