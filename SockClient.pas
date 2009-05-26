@@ -1465,28 +1465,23 @@ begin
       BufferRec.Length := 0;
     end;
 
-    // Must Always Init Buffers
-    if (BufferRec.Initial <= 0) then Exit;
-
     // Check Needed To Resize, Free Buffer
-    if (Needed > BufferRec.Length) or (Needed = 0) then
+    if ((Needed > BufferRec.Length) and (BufferRec.Initial > 0)) or (Needed <= 0) then
     begin
-      // Calculate New Size
-      if (Needed > BufferRec.Initial) then
-        NewSize := ((Needed div BufferRec.Initial) + 1) * BufferRec.Initial
-      else if (Needed = 0) then
-        NewSize := Needed
+      if (Needed > 0) then
+      begin
+        // Calculate New Size
+        NewSize := ((Needed div BufferRec.Initial) + 8) * BufferRec.Initial;
+      end
       else
-        NewSize := BufferRec.Initial;
+      begin
+        // Zero Buffer To Free
+        NewSize := 0;
+        BufferRec.Actual := 0;
+      end;
 
       ReallocMem(BufferRec.Buffer, NewSize);
       BufferRec.Length := NewSize;
-
-      // FreeBuffer
-      if (Needed = 0) then
-      begin
-        BufferRec.Actual := 0;
-      end;
     end;
   except
     BufferRec.Actual := 0;
