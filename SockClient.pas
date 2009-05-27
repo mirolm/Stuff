@@ -457,7 +457,7 @@ const
 // -------------------------------------------------------------------------- //
 
 const
-  INET_BUFF_LEN = 1024;      // Buffer Resize Step
+  INET_BUFF_LEN = 2048;      // Buffer Resize Step
   SOCK_MAX_CHUN = 32768;     // Max Buffer Size
   TROTTLE_WAIT  = 10;        // Trottle Loop Timeout
   PROBE_WAIT    = 0;         // Event Probe
@@ -1471,7 +1471,7 @@ begin
       if (Needed > 0) then
       begin
         // Calculate New Size
-        NewSize := ((Needed div BufferRec.Initial) + 8) * BufferRec.Initial;
+        NewSize := ((Needed div BufferRec.Initial) + 1) * BufferRec.Initial;
       end
       else
       begin
