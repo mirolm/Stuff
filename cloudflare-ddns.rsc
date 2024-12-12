@@ -3,7 +3,7 @@
 
   # Cloudflare stuff
   :local ApiToken "_CLOUDFLARE_API_TOKEN_";
-  :local ZoneId "_CLOUDFLARE_ZINE_ID_";
+  :local ZoneId "_CLOUDFLARE_ZONE_ID_";
   :local DnsServer "1.1.1.1"; 
 
   # Records to update
