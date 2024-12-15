@@ -22,7 +22,7 @@
 
   # Fetch WAN_IP from interface
   :local WanIp [/ip address get [find interface=$WanInterface] address];
-  :set WanIp [:pick $WanIp 0 ([:len $WanIp] -3)];
+  :set WanIp [:pick $WanIp 0 [:find $WanIp "/"]];
 
   :foreach DnsRecord in=$DnsRecords do={
     :do {
@@ -32,7 +32,7 @@
       # Compare and update if they differ
       :if ($WanIp != $DnsIp) do={
         # Prepare request payload
-        :local ReqRead ("https://api.cloudflare.com/client/v4/zones/" . $ZoneId . "/dns_records?name=" . $DnsRecord);
+        :local ReqRead ("https://api.cloudflare.com/client/v4/zones/" . $ZoneId . "/dns_records?name=" . $DnsRecord . "&type=A");
         :local ReqAuth ("Authorization: Bearer " . $ApiToken . ", Content-Type: application/json");
 
         # Query dns record
@@ -49,10 +49,10 @@
 
         # Prepare request payload
         :local ReqModi ("https://api.cloudflare.com/client/v4/zones/" . $ZoneId . "/dns_records/" . $DnsRecordId);
-        :local ReqData ("{\"type\":\"A\",\"name\":\"" . $DnsRecord . "\",\"content\":\"" . $WanIp . "\",\"ttl\":1,\"proxied\":false}");
+        :local ReqData ("{\"content\":\"" . $WanIp . "\"}");
 
         # Perform the update
-        :set Resp [/tool fetch mode=https http-method=put url=$ReqModi http-header-field=$ReqAuth http-data=$ReqData as-value output=user];
+        :set Resp [/tool fetch mode=https http-method=patch url=$ReqModi http-header-field=$ReqAuth http-data=$ReqData as-value output=user];
         :set Data [:deserialize from=json value=($Resp->"data")];
 
         # Check operation result
