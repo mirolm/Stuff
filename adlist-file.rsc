@@ -7,7 +7,7 @@
 
     # file stuff
     :local FileName "usb1-part1/hagezipro";
-    :local FileVer    "usb1-part1/hageziver";
+    :local FileVer  "usb1-part1/hageziver";
 
 ########################################################################################
 ########################################################################################
