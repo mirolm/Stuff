@@ -13,7 +13,7 @@
 ########################################################################################
 
     # Wait some for dhcp lease
-    :delay 10;
+    :delay 60;
 
     :do {
         :log debug "AD_SYNC: started";
