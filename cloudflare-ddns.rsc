@@ -16,7 +16,7 @@
 ########################################################################################
 
     # Wait some for dhcp lease
-    :delay 10;
+    :delay 60;
 
     # Fetch WAN_IP from interface
     :local WanIp [/ip/address/get [find where interface=$WanInterface] address];
