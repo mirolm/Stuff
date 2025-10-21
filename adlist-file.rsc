@@ -66,12 +66,11 @@
 
     :do {
         # refresh from Hagezi MultiPro
-	    $UpdateAdlist url=https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/hosts/pro.txt dest=usb1-part1/hagezipro repo=hagezi/dns-blocklists;
-	    # refresh from StevenBlack
-	    $UpdateAdlist url=https://raw.githubusercontent.com/StevenBlack/hosts/refs/heads/master/alternates/fakenews-gambling/hosts dest=usb1-part1/stevenblack repo=StevenBlack/hosts;
+        $UpdateAdlist url=https://raw.githubusercontent.com/hagezi/dns-blocklists/refs/heads/main/hosts/pro.txt dest=usb1-part1/hagezipro repo=hagezi/dns-blocklists;
+        # refresh from StevenBlack
+        $UpdateAdlist url=https://raw.githubusercontent.com/StevenBlack/hosts/refs/heads/master/alternates/fakenews-gambling/hosts dest=usb1-part1/stevenblack repo=StevenBlack/hosts;
     } on-error={
-	    /log warning "AD_SYNC: update failed";
+        /log warning "AD_SYNC: update failed";
     };
 
 ########################################################################################
-
