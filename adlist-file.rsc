@@ -17,7 +17,7 @@
 
             # reset to empty file if missing
             if ([:len [/file/find where name=$ver]] = 0) do={
-                /file/add name=$ver contents="empty-file-123";
+                /file/add name=$ver contents="empty-tag-123";
             };
 
             # get local version
@@ -45,6 +45,7 @@
                     # delete corruted adlist
                     /ip/dns/adlist/remove [find where file=$dest];
                     /file/remove [find where name=$dest];
+                    /file/remove [find where name=$ver];
                     :log warning "AD_SYNC: adlist corrupted";
                 };
             } else={
