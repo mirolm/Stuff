@@ -9,7 +9,7 @@
             :log debug "AD_SYNC: started";
 
             :local api ("https://api.github.com/repos/" . $repo . "/releases/latest");
-            :local ver ($dest . "ver");
+            :local ver ($dest . ".ver");
 
             # get blacklist version
             :local FileData [/tool/fetch mode=https http-method=get url=$api output=user as-value];
